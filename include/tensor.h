@@ -22,9 +22,9 @@ class Tensor {
         bool   is_contiguous() const;
 
         // Access
-        scalar_t& at(std::initializer_list<size_t> indices);
-        scalar_t  at(std::initializer_list<size_t> indices) const;
-        const std::vector<scalar_t>& data() const;
+        scalar_t& at(std::initializer_list<size_t> indices); //return reference to value so it can be modified
+        scalar_t  at(std::initializer_list<size_t> indices) const; //return copy read version
+        const std::vector<scalar_t>& data() const; //read only access to data vector 
 
         // Shape ops note it would still point to the same data but with different shape and strides
         Tensor reshape(std::vector<size_t> new_shape) const; 
