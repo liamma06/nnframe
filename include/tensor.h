@@ -6,10 +6,12 @@ using scalar_t = float; //might change later
 
 class Tensor {
     private: 
-        std::shared_ptr<std::vector<scalar_t>> _data; //pointer to tensor data 
-        std::vector<size_t> _shape; 
-        std::vector<size_t> _strides; 
-        size_t offset; 
+        std::shared_ptr<std::vector<scalar_t>> data_; //pointer to tensor data
+        std::vector<size_t> shape_;
+        std::vector<size_t> strides_;
+        size_t offset_;
+
+        size_t compute_strides();
 
     public: 
         Tensor(std::vector<size_t> shape, scalar_t fill_value = 0.0f); 
