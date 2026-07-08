@@ -22,6 +22,13 @@ Tensor::Tensor(std::vector<size_t> shape, std::vector<scalar_t> data){
     data_ = std::make_shared<std::vector<scalar_t>>(data); //direct input data
 }
 
+Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset) {
+    data_ = data;
+    shape_ = shape;
+    strides_ = strides;
+    offset_ = offset;
+}
+
 //hlper stride func 
 size_t Tensor::compute_strides() {
     strides_.resize(shape_.size()); //match shape size
@@ -81,5 +88,30 @@ scalar_t Tensor::at(std::initializer_list<size_t> indices) const {
         pos += index * strides_[i];
         i++;
     }
-    return (*data_)[pos]; //only val return because of const 
+    return (*data_)[pos]; //only copy val return because of const 
+}
+
+ const std::vector<scalar_t>&  Tensor::data() const{
+    return *data_; 
+ }
+
+Tensor Tensor::reshape(std::vector<size_t> new_shape) const {
+
+    assert(is_contiguous() && "Tensor must be contiguous to reshape");
+    
+    size_t new_numel = 1;
+    for (size_t dim : new_shape) {
+        new_numel *= dim;
+    }
+    assert(new_numel == numel() && "New shape must have the same number of elements as the original tensor");
+
+    // compute new strides locally don't replace the old ones because we want to keep the original tensor intact
+    std::vector<size_t> new_strides(new_shape.size());
+    size_t stride = 1;
+    for (int i = new_shape.size() - 1; i >= 0; i--) {
+        new_strides[i] = stride;
+        stride *= new_shape[i];
+    }
+
+    return Tensor(data_, new_shape, new_strides, offset_);
 }
