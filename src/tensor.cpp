@@ -33,6 +33,7 @@ size_t Tensor::compute_strides() {
     return stride;  //total
 }
 
+
 const std::vector<size_t>& Tensor::shape() const {
     return shape_;
 }
@@ -57,4 +58,28 @@ bool Tensor::is_contiguous() const {
         expected *= shape_[i];
     }
     return true;
+}
+
+scalar_t& Tensor::at(std::initializer_list<size_t> indices) {
+    assert(indices.size() == shape_.size() && "Number of indices must match tensor rank");
+    size_t pos = offset_;
+    size_t i = 0;
+    for (auto index: indices){
+        assert(index < shape_[i] && "Index out of bounds");
+        pos += index * strides_[i];
+        i++;
+    }
+    return (*data_)[pos]; //dereference pointer and return reference to specific val 
+}
+
+scalar_t Tensor::at(std::initializer_list<size_t> indices) const {
+    assert(indices.size() == shape_.size() && "Number of indices must match tensor rank");
+    size_t pos = offset_;
+    size_t i = 0;
+    for (auto index : indices) {
+        assert(index < shape_[i] && "Index out of bounds");
+        pos += index * strides_[i];
+        i++;
+    }
+    return (*data_)[pos]; //only val return because of const 
 }
