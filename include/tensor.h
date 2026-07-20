@@ -33,6 +33,7 @@ class Tensor {
         // Shape ops note it would still point to the same data but with different shape and strides
         Tensor reshape(std::vector<size_t> new_shape) const; 
         Tensor transpose() const;
+        Tensor permute(std::vector<size_t> axes) const;
 
         // Math ops(completely new tensor is returned )
         Tensor add(const Tensor& other) const;

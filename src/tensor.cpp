@@ -115,3 +115,27 @@ Tensor Tensor::reshape(std::vector<size_t> new_shape) const {
 
     return Tensor(data_, new_shape, new_strides, offset_);
 }
+
+Tensor Tensor::permute(std::vector<size_t> axes) const{
+    assert(axes.size() == shape_.size() && "Axes length must match tensor rank");
+
+    for (size_t a: axes){
+        assert(a < shape_.size() && "Axis index out of bounds");
+    }
+
+    std::vector<bool> seen(shape_.size(), false);
+    for (size_t a: axes){
+        assert(!seen[a] && "Axes must be unique");
+        seen[a] = true;
+    }
+
+    std::vector<size_t> new_shape(shape_.size());
+    std::vector<size_t> new_strides(strides_.size());
+
+    //swapping shape and strides based on axes
+    for (size_t i = 0; i <axes.size(); i++){
+        new_shape[i] = shape_[axes[i]];
+        new_strides[i] = strides_[axes[i]];
+    }
+    return Tensor(data_, new_shape, new_strides, offset_); 
+}
