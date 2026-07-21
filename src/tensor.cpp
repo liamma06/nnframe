@@ -209,3 +209,73 @@ Tensor Tensor::add(const Tensor& other) const{
 
     return output_tensor;
 }
+
+Tensor Tensor::sub(const Tensor& other) const {
+    size_t out_rank = std::max(rank(), other.rank());
+    std::vector<size_t> new_shape(out_rank);
+
+    for (size_t i = 0; i < out_rank; i++) {
+        size_t a = (i < rank()) ? shape_[i] : 1;
+        size_t b = (i < other.rank()) ? other.shape()[i] : 1;
+        assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for subtraction");
+        new_shape[i] = std::max(a, b);
+    }
+
+    Tensor output_tensor(new_shape, 0.0f);
+    std::vector<size_t> cur_idx(out_rank, 0);
+
+    for (size_t i = 0; i < output_tensor.numel(); i++) {
+        std::vector<size_t> a_idx(rank());
+        std::vector<size_t> b_idx(other.rank());
+
+        for (size_t j = 0; j < rank(); j++)
+            a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j];
+
+        for (size_t j = 0; j < other.rank(); j++)
+            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j];
+
+        output_tensor.at(cur_idx) = at(a_idx) - other.at(b_idx);
+
+        for (int k = out_rank - 1; k >= 0; k--) {
+            if (++cur_idx[k] < new_shape[k]) break;
+            cur_idx[k] = 0;
+        }
+    }
+
+    return output_tensor;
+}
+
+Tensor Tensor::mul(const Tensor& other) const {
+    size_t out_rank = std::max(rank(), other.rank());
+    std::vector<size_t> new_shape(out_rank);
+
+    for (size_t i = 0; i < out_rank; i++) {
+        size_t a = (i < rank()) ? shape_[i] : 1;
+        size_t b = (i < other.rank()) ? other.shape()[i] : 1;
+        assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for multiplication");
+        new_shape[i] = std::max(a, b);
+    }
+
+    Tensor output_tensor(new_shape, 0.0f);
+    std::vector<size_t> cur_idx(out_rank, 0);
+
+    for (size_t i = 0; i < output_tensor.numel(); i++) {
+        std::vector<size_t> a_idx(rank());
+        std::vector<size_t> b_idx(other.rank());
+
+        for (size_t j = 0; j < rank(); j++)
+            a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j];
+
+        for (size_t j = 0; j < other.rank(); j++)
+            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j];
+
+        output_tensor.at(cur_idx) = at(a_idx) * other.at(b_idx);
+
+        for (int k = out_rank - 1; k >= 0; k--) {
+            if (++cur_idx[k] < new_shape[k]) break;
+            cur_idx[k] = 0;
+        }
+    }
+
+    return output_tensor;
+}
