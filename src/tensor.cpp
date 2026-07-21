@@ -72,7 +72,7 @@ scalar_t& Tensor::at(std::initializer_list<size_t> indices) {
     size_t pos = offset_;
     size_t i = 0;
     for (auto index: indices){
-        assert(index < shape_[i] && "Index out of bounds");
+        assert(index < shape_[i] && "Index so of bounds");
         pos += index * strides_[i];
         i++;
     }
@@ -91,8 +91,28 @@ scalar_t Tensor::at(std::initializer_list<size_t> indices) const {
     return (*data_)[pos]; //only copy val return because of const 
 }
 
+scalar_t& Tensor::at(const std::vector<size_t>& indices) {
+    assert(indices.size() == shape_.size() && "Number of indices must match tensor rank");
+    size_t pos = offset_;
+    for (size_t i = 0; i < indices.size(); i++) {
+        assert(indices[i] < shape_[i] && "Index out of bounds");
+        pos += indices[i] * strides_[i];
+    }
+    return (*data_)[pos];
+}
+
+scalar_t Tensor::at(const std::vector<size_t>& indices) const {
+    assert(indices.size() == shape_.size() && "Number of indices must match tensor rank");
+    size_t pos = offset_;
+    for (size_t i = 0; i < indices.size(); i++) {
+        assert(indices[i] < shape_[i] && "Index out of bounds");
+        pos += indices[i] * strides_[i];
+    }
+    return (*data_)[pos];
+}
+
  const std::vector<scalar_t>&  Tensor::data() const{
-    return *data_; 
+    return *data_;
  }
 
 Tensor Tensor::reshape(std::vector<size_t> new_shape) const {
@@ -138,4 +158,54 @@ Tensor Tensor::permute(std::vector<size_t> axes) const{
         new_strides[i] = strides_[axes[i]];
     }
     return Tensor(data_, new_shape, new_strides, offset_); 
+}
+
+Tensor Tensor::add(const Tensor& other) const{
+    size_t out_rank = std::max(rank(), other.rank()); //take the larger rank/size of the 2 tensors 
+    std::vector<size_t> new_shape(out_rank);
+
+    for (size_t i = 0; i < out_rank; i ++){
+        //basically if the shape don't match or is 1 then bad
+        size_t a = ( i < rank()) ? shape_[i] : 1; 
+        size_t b = ( i < other.rank()) ? other.shape()[i] : 1;
+        
+        assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for addition");
+
+        new_shape[i] = std::max(a, b); //take the larger shape for the new tensor
+    }
+
+    Tensor output_tensor(new_shape, 0.0f); 
+
+    //we don't know the rank so we cant just nest for loops 
+    //odometer 
+
+    std::vector<size_t> cur_idx(out_rank, 0);  //match dim 
+
+    for (size_t i = 0; i < output_tensor.numel(); i++){
+        std::vector<size_t> a_idx(rank());
+        std::vector<size_t> b_idx(other.rank());
+        /*
+            compute indicies for values to add based on curr index. 
+            if shape 1 then just use 0 otherwise use the right index because that is what is impacting
+            [1,2,3] only the 2nd and 3rd dim are impacting the output so we just use those indicies for the first tensor
+        */
+
+        for (size_t j =0; j < rank(); j++){
+            a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j]; 
+        }
+
+        for (size_t j = 0; j < other.rank(); j++){
+            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j]; 
+        }
+
+        output_tensor.at(cur_idx) = at(a_idx) + other.at(b_idx); 
+
+        //does the odometer incrementing thing to get the next index for the output tensor
+        for (int k = out_rank - 1; k >= 0; k--) {
+            if (++cur_idx[k] < new_shape[k]) break;
+            cur_idx[k] = 0;
+        }
+    }
+
+    return output_tensor;
 }
