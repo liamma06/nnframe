@@ -1,6 +1,7 @@
-#include "tensor.h" 
-#include <cassert> //checks 
-#include <numeric> 
+#include "tensor.h"
+#include <cassert>
+#include <numeric>
+#include <cmath>
 
 Tensor::Tensor(std::vector<size_t> shape, scalar_t fill){
     shape_ = shape;
@@ -157,7 +158,12 @@ Tensor Tensor::permute(std::vector<size_t> axes) const{
         new_shape[i] = shape_[axes[i]];
         new_strides[i] = strides_[axes[i]];
     }
-    return Tensor(data_, new_shape, new_strides, offset_); 
+    return Tensor(data_, new_shape, new_strides, offset_);
+}
+
+Tensor Tensor::transpose() const {
+    assert(rank() == 2 && "transpose is for 2D tensors, use permute for higher ranks");
+    return permute({1, 0});
 }
 
 Tensor Tensor::add(const Tensor& other) const{
@@ -278,6 +284,14 @@ Tensor Tensor::mul(const Tensor& other) const {
     }
 
     return output_tensor;
+}
+
+bool Tensor::allclose(const Tensor& other, scalar_t eps) const {
+    assert(shape_ == other.shape_ && "Shapes must match for allclose");
+    for (size_t i = 0; i < data_->size(); i++) {
+        if (std::abs((*data_)[i] - (*other.data_)[i]) > eps) return false;
+    }
+    return true;
 }
 
 Tensor Tensor::operator+(const Tensor& other) const { return add(other); }
