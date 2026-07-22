@@ -280,6 +280,10 @@ Tensor Tensor::mul(const Tensor& other) const {
     return output_tensor;
 }
 
+Tensor Tensor::operator+(const Tensor& other) const { return add(other); }
+Tensor Tensor::operator-(const Tensor& other) const { return sub(other); }
+Tensor Tensor::operator*(const Tensor& other) const { return mul(other); }
+
 Tensor Tensor::matmul(const Tensor& other) const{
     assert(rank() == 2 && other.rank() == 2 && "Both tensors must be 2D for matrix multiplication");
     assert(shape_[1] == other.shape()[0] && "Inner dimensions must match for matrix multiplication");
