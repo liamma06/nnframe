@@ -279,3 +279,36 @@ Tensor Tensor::mul(const Tensor& other) const {
 
     return output_tensor;
 }
+
+Tensor Tensor::matmul(const Tensor& other) const{
+    assert(rank() == 2 && other.rank() == 2 && "Both tensors must be 2D for matrix multiplication");
+    assert(shape_[1] == other.shape()[0] && "Inner dimensions must match for matrix multiplication");
+
+    size_t M = shape_[0];
+    size_t K = shape_[1];
+    size_t N = other.shape()[1];
+
+    Tensor output_tensor({M, N}, 0.0f);
+
+    /*
+        dot product for each element in the output tensor
+
+        For every sample(i) loop through the neurons(j) and compute the dot products with
+        the inputs(k) and the weights(k) of the other tensor.
+
+        therefore the inputs and weights have to match the same size
+
+        for each sample and each neuron the full input dot weights is stored in output tensor
+    */
+    for (size_t i = 0; i < M; i++) {
+        for (size_t j = 0; j < N; j++) {
+            scalar_t sum = 0.0f;
+            for (size_t k = 0; k < K; k++) {
+                sum += at({i, k}) * other.at({k, j});
+            }
+            output_tensor.at({i, j}) = sum; //save sum to output tensor 
+        }
+    }
+
+    return output_tensor;
+}
