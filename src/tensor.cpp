@@ -330,3 +330,15 @@ Tensor Tensor::matmul(const Tensor& other) const{
 
     return output_tensor;
 }
+
+// AUTOGRAD
+
+bool Tensor::requires_grad() const { return requires_grad_; }
+void Tensor::set_requires_grad(bool val) { requires_grad_ = val; }
+Tensor& Tensor::grad() { return *grad_; }
+
+void Tensor::backward(){
+
+    //inital gradient just 1 
+    grad_ = std::make_shared<Tensor>(Tensor(shape_, 1.0f)); 
+}

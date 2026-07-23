@@ -1,6 +1,7 @@
 #pragma once 
 #include <vector>
 #include <memory> 
+#include <functional>
 
 using scalar_t = float; //might change later 
 
@@ -10,6 +11,14 @@ class Tensor {
         std::vector<size_t> shape_;
         std::vector<size_t> strides_;
         size_t offset_;
+
+        //autograd 
+        bool requires_grad_ = false;
+        std::shared_ptr<Tensor> grad_; 
+        std::function<void(const Tensor&)> grad_fn_; //store function to compute gradient
+        std::vector<std::shared_ptr<Tensor>> inputs_; //store parents for backpropagation
+
+
 
         size_t compute_strides();
 
@@ -50,4 +59,10 @@ class Tensor {
         Tensor operator*(const Tensor& other) const;
 
         bool allclose(const Tensor& other, scalar_t eps = 1e-5f) const; //comparison testing 
+
+        //autograd
+        bool requires_grad() const;
+        Tensor& grad();
+        void set_requires_grad(bool val);
+        void backward();
 };
