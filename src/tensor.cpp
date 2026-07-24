@@ -116,10 +116,10 @@ scalar_t Tensor::at(const std::vector<size_t>& indices) const {
     return *data_;
  }
 
-Tensor Tensor::reshape(std::vector<size_t> new_shape) const {
+TensorPtr Tensor::reshape(std::vector<size_t> new_shape) const {
 
     assert(is_contiguous() && "Tensor must be contiguous to reshape");
-    
+
     size_t new_numel = 1;
     for (size_t dim : new_shape) {
         new_numel *= dim;
@@ -134,10 +134,10 @@ Tensor Tensor::reshape(std::vector<size_t> new_shape) const {
         stride *= new_shape[i];
     }
 
-    return Tensor(data_, new_shape, new_strides, offset_);
+    return TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
 }
 
-Tensor Tensor::permute(std::vector<size_t> axes) const{
+TensorPtr Tensor::permute(std::vector<size_t> axes) const{
     assert(axes.size() == shape_.size() && "Axes length must match tensor rank");
 
     for (size_t a: axes){
@@ -158,53 +158,53 @@ Tensor Tensor::permute(std::vector<size_t> axes) const{
         new_shape[i] = shape_[axes[i]];
         new_strides[i] = strides_[axes[i]];
     }
-    return Tensor(data_, new_shape, new_strides, offset_);
+    return TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
 }
 
-Tensor Tensor::transpose() const {
+TensorPtr Tensor::transpose() const {
     assert(rank() == 2 && "transpose is for 2D tensors, use permute for higher ranks");
     return permute({1, 0});
 }
 
-Tensor Tensor::add(const Tensor& other) const{
-    size_t out_rank = std::max(rank(), other.rank()); //take the larger rank/size of the 2 tensors 
+TensorPtr Tensor::add(const TensorPtr& other) const{
+    size_t out_rank = std::max(rank(), other->rank()); //take the larger rank/size of the 2 tensors
     std::vector<size_t> new_shape(out_rank);
 
     for (size_t i = 0; i < out_rank; i ++){
         //basically if the shape don't match or is 1 then bad
-        size_t a = ( i < rank()) ? shape_[i] : 1; 
-        size_t b = ( i < other.rank()) ? other.shape()[i] : 1;
-        
+        size_t a = ( i < rank()) ? shape_[i] : 1;
+        size_t b = ( i < other->rank()) ? other->shape()[i] : 1;
+
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for addition");
 
         new_shape[i] = std::max(a, b); //take the larger shape for the new tensor
     }
 
-    Tensor output_tensor(new_shape, 0.0f); 
+    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
 
-    //we don't know the rank so we cant just nest for loops 
-    //odometer 
+    //we don't know the rank so we cant just nest for loops
+    //odometer
 
-    std::vector<size_t> cur_idx(out_rank, 0);  //match dim 
+    std::vector<size_t> cur_idx(out_rank, 0);  //match dim
 
-    for (size_t i = 0; i < output_tensor.numel(); i++){
+    for (size_t i = 0; i < output_tensor->numel(); i++){
         std::vector<size_t> a_idx(rank());
-        std::vector<size_t> b_idx(other.rank());
+        std::vector<size_t> b_idx(other->rank());
         /*
-            compute indicies for values to add based on curr index. 
+            compute indicies for values to add based on curr index.
             if shape 1 then just use 0 otherwise use the right index because that is what is impacting
             [1,2,3] only the 2nd and 3rd dim are impacting the output so we just use those indicies for the first tensor
         */
 
         for (size_t j =0; j < rank(); j++){
-            a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j]; 
+            a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j];
         }
 
-        for (size_t j = 0; j < other.rank(); j++){
-            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j]; 
+        for (size_t j = 0; j < other->rank(); j++){
+            b_idx[j] = (other->shape()[j] == 1) ? 0 : cur_idx[out_rank - other->rank() + j];
         }
 
-        output_tensor.at(cur_idx) = at(a_idx) + other.at(b_idx); 
+        output_tensor->at(cur_idx) = at(a_idx) + other->at(b_idx);
 
         //does the odometer incrementing thing to get the next index for the output tensor
         for (int k = out_rank - 1; k >= 0; k--) {
@@ -216,31 +216,31 @@ Tensor Tensor::add(const Tensor& other) const{
     return output_tensor;
 }
 
-Tensor Tensor::sub(const Tensor& other) const {
-    size_t out_rank = std::max(rank(), other.rank());
+TensorPtr Tensor::sub(const TensorPtr& other) const {
+    size_t out_rank = std::max(rank(), other->rank());
     std::vector<size_t> new_shape(out_rank);
 
     for (size_t i = 0; i < out_rank; i++) {
         size_t a = (i < rank()) ? shape_[i] : 1;
-        size_t b = (i < other.rank()) ? other.shape()[i] : 1;
+        size_t b = (i < other->rank()) ? other->shape()[i] : 1;
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for subtraction");
         new_shape[i] = std::max(a, b);
     }
 
-    Tensor output_tensor(new_shape, 0.0f);
+    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
     std::vector<size_t> cur_idx(out_rank, 0);
 
-    for (size_t i = 0; i < output_tensor.numel(); i++) {
+    for (size_t i = 0; i < output_tensor->numel(); i++) {
         std::vector<size_t> a_idx(rank());
-        std::vector<size_t> b_idx(other.rank());
+        std::vector<size_t> b_idx(other->rank());
 
         for (size_t j = 0; j < rank(); j++)
             a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j];
 
-        for (size_t j = 0; j < other.rank(); j++)
-            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j];
+        for (size_t j = 0; j < other->rank(); j++)
+            b_idx[j] = (other->shape()[j] == 1) ? 0 : cur_idx[out_rank - other->rank() + j];
 
-        output_tensor.at(cur_idx) = at(a_idx) - other.at(b_idx);
+        output_tensor->at(cur_idx) = at(a_idx) - other->at(b_idx);
 
         for (int k = out_rank - 1; k >= 0; k--) {
             if (++cur_idx[k] < new_shape[k]) break;
@@ -251,31 +251,31 @@ Tensor Tensor::sub(const Tensor& other) const {
     return output_tensor;
 }
 
-Tensor Tensor::mul(const Tensor& other) const {
-    size_t out_rank = std::max(rank(), other.rank());
+TensorPtr Tensor::mul(const TensorPtr& other) const {
+    size_t out_rank = std::max(rank(), other->rank());
     std::vector<size_t> new_shape(out_rank);
 
     for (size_t i = 0; i < out_rank; i++) {
         size_t a = (i < rank()) ? shape_[i] : 1;
-        size_t b = (i < other.rank()) ? other.shape()[i] : 1;
+        size_t b = (i < other->rank()) ? other->shape()[i] : 1;
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for multiplication");
         new_shape[i] = std::max(a, b);
     }
 
-    Tensor output_tensor(new_shape, 0.0f);
+    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
     std::vector<size_t> cur_idx(out_rank, 0);
 
-    for (size_t i = 0; i < output_tensor.numel(); i++) {
+    for (size_t i = 0; i < output_tensor->numel(); i++) {
         std::vector<size_t> a_idx(rank());
-        std::vector<size_t> b_idx(other.rank());
+        std::vector<size_t> b_idx(other->rank());
 
         for (size_t j = 0; j < rank(); j++)
             a_idx[j] = (shape_[j] == 1) ? 0 : cur_idx[out_rank - rank() + j];
 
-        for (size_t j = 0; j < other.rank(); j++)
-            b_idx[j] = (other.shape()[j] == 1) ? 0 : cur_idx[out_rank - other.rank() + j];
+        for (size_t j = 0; j < other->rank(); j++)
+            b_idx[j] = (other->shape()[j] == 1) ? 0 : cur_idx[out_rank - other->rank() + j];
 
-        output_tensor.at(cur_idx) = at(a_idx) * other.at(b_idx);
+        output_tensor->at(cur_idx) = at(a_idx) * other->at(b_idx);
 
         for (int k = out_rank - 1; k >= 0; k--) {
             if (++cur_idx[k] < new_shape[k]) break;
@@ -294,19 +294,19 @@ bool Tensor::allclose(const Tensor& other, scalar_t eps) const {
     return true;
 }
 
-Tensor Tensor::operator+(const Tensor& other) const { return add(other); }
-Tensor Tensor::operator-(const Tensor& other) const { return sub(other); }
-Tensor Tensor::operator*(const Tensor& other) const { return mul(other); }
+TensorPtr Tensor::operator+(const TensorPtr& other) const { return add(other); }
+TensorPtr Tensor::operator-(const TensorPtr& other) const { return sub(other); }
+TensorPtr Tensor::operator*(const TensorPtr& other) const { return mul(other); }
 
-Tensor Tensor::matmul(const Tensor& other) const{
-    assert(rank() == 2 && other.rank() == 2 && "Both tensors must be 2D for matrix multiplication");
-    assert(shape_[1] == other.shape()[0] && "Inner dimensions must match for matrix multiplication");
+TensorPtr Tensor::matmul(const TensorPtr& other) const {
+    assert(rank() == 2 && other->rank() == 2 && "Both tensors must be 2D for matrix multiplication");
+    assert(shape_[1] == other->shape()[0] && "Inner dimensions must match for matrix multiplication");
 
     size_t M = shape_[0];
     size_t K = shape_[1];
-    size_t N = other.shape()[1];
+    size_t N = other->shape()[1];
 
-    Tensor output_tensor({M, N}, 0.0f);
+    auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{M, N}, 0.0f);
 
     /*
         dot product for each element in the output tensor
@@ -322,9 +322,9 @@ Tensor Tensor::matmul(const Tensor& other) const{
         for (size_t j = 0; j < N; j++) {
             scalar_t sum = 0.0f;
             for (size_t k = 0; k < K; k++) {
-                sum += at({i, k}) * other.at({k, j});
+                sum += at({i, k}) * other->at({k, j});
             }
-            output_tensor.at({i, j}) = sum; //save sum to output tensor 
+            output_tensor->at({i, j}) = sum;
         }
     }
 

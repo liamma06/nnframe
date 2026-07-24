@@ -3,7 +3,9 @@
 #include <memory> 
 #include <functional>
 
-using scalar_t = float; //might change later 
+using scalar_t = float; //might change later
+class Tensor; // forward declaration so TensorPtr can reference it
+using TensorPtr = std::shared_ptr<Tensor>;
 
 class Tensor {
     private: 
@@ -43,20 +45,20 @@ class Tensor {
         const std::vector<scalar_t>& data() const; //read only access to data vector 
 
         // Shape ops note it would still point to the same data but with different shape and strides
-        Tensor reshape(std::vector<size_t> new_shape) const; 
-        Tensor transpose() const;
-        Tensor permute(std::vector<size_t> axes) const;
+        TensorPtr reshape(std::vector<size_t> new_shape) const;
+        TensorPtr transpose() const;
+        TensorPtr permute(std::vector<size_t> axes) const;
 
         // Math ops(completely new tensor is returned )
-        Tensor add(const Tensor& other) const;
-        Tensor sub(const Tensor& other) const;
-        Tensor mul(const Tensor& other) const;
-        Tensor matmul(const Tensor& other) const;
+        TensorPtr add(const TensorPtr& other) const;
+        TensorPtr sub(const TensorPtr& other) const;
+        TensorPtr mul(const TensorPtr& other) const;
+        TensorPtr matmul(const TensorPtr& other) const;
 
-        //to make it easier to use math symbols they just link to the tensor functions 
-        Tensor operator+(const Tensor& other) const;
-        Tensor operator-(const Tensor& other) const;
-        Tensor operator*(const Tensor& other) const;
+        //to make it easier to use math symbols they just link to the tensor functions
+        TensorPtr operator+(const TensorPtr& other) const;
+        TensorPtr operator-(const TensorPtr& other) const;
+        TensorPtr operator*(const TensorPtr& other) const;
 
         bool allclose(const Tensor& other, scalar_t eps = 1e-5f) const; //comparison testing 
 
