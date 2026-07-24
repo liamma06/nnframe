@@ -7,7 +7,7 @@ using scalar_t = float; //might change later
 class Tensor; // forward declaration so TensorPtr can reference it
 using TensorPtr = std::shared_ptr<Tensor>;
 
-class Tensor {
+class Tensor : public std::enable_shared_from_this<Tensor> {
     private: 
         std::shared_ptr<std::vector<scalar_t>> data_; //pointer to tensor data
         std::vector<size_t> shape_;

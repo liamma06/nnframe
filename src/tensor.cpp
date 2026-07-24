@@ -213,6 +213,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         }
     }
 
+    
     return output_tensor;
 }
 
@@ -340,5 +341,7 @@ Tensor& Tensor::grad() { return *grad_; }
 void Tensor::backward(){
 
     //inital gradient just 1 
-    grad_ = std::make_shared<Tensor>(Tensor(shape_, 1.0f)); 
+    grad_ = std::make_shared<Tensor>(shape_, 1.0f); 
+
+
 }
