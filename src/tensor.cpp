@@ -2,6 +2,7 @@
 #include <cassert>
 #include <numeric>
 #include <cmath>
+#include <unordered_set>
 
 Tensor::Tensor(std::vector<size_t> shape, scalar_t fill){
     shape_ = shape;
@@ -166,6 +167,14 @@ TensorPtr Tensor::transpose() const {
     return permute({1, 0});
 }
 
+std::vector<scalar_t>& Tensor::mutable_data(){
+    /*
+        Purpose: return a reference cause in the lambda grad_fn_
+        we want to be able to modify the data of the tensor but data_ is private 
+    */
+    return *data_; 
+}
+
 TensorPtr Tensor::add(const TensorPtr& other) const{
     size_t out_rank = std::max(rank(), other->rank()); //take the larger rank/size of the 2 tensors
     std::vector<size_t> new_shape(out_rank);
@@ -213,7 +222,41 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         }
     }
 
-    
+    /*
+        shared pointer to current tensor so same reference count
+        this important for autograd because we want to keep track of the parents and their reference counts so they don't get deleted before we can compute the gradients
+        because I learned if the reference count goes to 0 then it removes it ignoring if it still used i nthe computation graph. 
+    */
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+
+    output_tensor->inputs_ = std::vector<TensorPtr>{self,other}; //parents
+    output_tensor->grad_fn_ = [self, other] (const Tensor& upstream){
+        /*
+            take incoming gradient from upstream 
+            and compute the gradient for each parent/input tensor and add it to their gradient
+            basically chain rule 
+        */
+        if (self->requires_grad_){
+            if (!self->grad_){
+                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
+            }
+            
+            for (size_t i = 0; i < self->numel(); i++){
+                self->grad_->mutable_data()[i] += upstream.data()[i]; //add the incoming gradient (read only) to the parent tensor's gradient
+            }
+        }
+
+        if (other->requires_grad_){
+            if (!other->grad_){
+                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
+            }
+
+            for (size_t i = 0; i < other->numel(); i++){
+                other->grad_->mutable_data()[i] += upstream.data()[i];
+            }
+        }
+    };
+
     return output_tensor;
 }
 
@@ -249,6 +292,32 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
         }
     }
 
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+
+    output_tensor->inputs_ = std::vector<TensorPtr>{self,other}; //parents
+    output_tensor->grad_fn_ = [self, other] (const Tensor& upstream){
+
+        if (self->requires_grad_){
+            if (!self->grad_){
+                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
+            }
+            
+            for (size_t i = 0; i < self->numel(); i++){
+                self->grad_->mutable_data()[i] += upstream.data()[i]; //c = a -b only b negative
+            }
+        }
+
+        if (other->requires_grad_){
+            if (!other->grad_){
+                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
+            }
+
+            for (size_t i = 0; i < other->numel(); i++){
+                other->grad_->mutable_data()[i] -= upstream.data()[i];
+            }
+        }
+    };
+
     return output_tensor;
 }
 
@@ -283,6 +352,32 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
             cur_idx[k] = 0;
         }
     }
+
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+
+    output_tensor->inputs_ = std::vector<TensorPtr>{self,other}; //parents
+    output_tensor->grad_fn_ = [self, other] (const Tensor& upstream){
+
+        if (self->requires_grad_){
+            if (!self->grad_){
+                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
+            }
+            
+            for (size_t i = 0; i < self->numel(); i++){
+                self->grad_->mutable_data()[i] += upstream.data()[i] * other->data()[i]; // c = a * b, dc/da = b, so dL/da = upstream * b
+            }
+        }
+
+        if (other->requires_grad_){
+            if (!other->grad_){
+                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
+            }
+
+            for (size_t i = 0; i < other->numel(); i++){
+                other->grad_->mutable_data()[i] += upstream.data()[i] * self->data()[i]; // c = a * b if a then dc/da = 1 * db/da derivative multiple the other one
+            }
+        }
+    };
 
     return output_tensor;
 }
@@ -343,5 +438,33 @@ void Tensor::backward(){
     //inital gradient just 1 
     grad_ = std::make_shared<Tensor>(shape_, 1.0f); 
 
+    std::vector<Tensor*> order_list;
+    std::unordered_set<Tensor*> visited; 
+    std::function<void(Tensor*)> dfs; 
 
+    dfs = [&](Tensor* node){
+        if (visited.count(node)) return;
+
+        visited.insert(node);
+
+        //reference loop (no copy) 
+        for (auto& input : node->inputs_){
+            dfs(input.get());
+        }
+        order_list.push_back(node); 
+
+
+    };
+
+    dfs(this); //start recursion
+
+    //we want the this -> end ( 1 grad -> iterate down parents)
+    std::reverse(order_list.begin(), order_list.end());
+
+    //loop through each op and comptue the gradient for each passing the upstream gradients into each !
+    for(auto& node : order_list){
+        if (node->grad_fn_ && node->grad_){
+            node->grad_fn_(*node->grad_);
+        }
+    }
 }
