@@ -424,6 +424,46 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
         }
     }
 
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+
+    output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
+    output_tensor->grad_fn_ = [self, other](const Tensor& upstream) {
+        
+        if (self->requires_grad_) {
+            if (!self->grad_) {
+                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
+            }
+
+            // Gradient w.r.t self: upstream * other^T
+            for (size_t i = 0; i < self->shape_[0]; i++) {
+                for (size_t k = 0; k < self->shape_[1]; k++) {
+                    scalar_t sum = 0.0f;
+                    for (size_t j = 0; j < other->shape()[1]; j++) {
+                        sum += upstream.at({i, j}) * other->at({k, j});
+                    }
+                    self->grad_->at({i, k}) += sum;
+                }
+            }
+        }
+
+        if (other->requires_grad_) {
+            if (!other->grad_) {
+                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
+            }
+
+            // Gradient w.r.t other: self^T * upstream
+            for (size_t k = 0; k < other->shape()[0]; k++) {
+                for (size_t j = 0; j < other->shape()[1]; j++) {
+                    scalar_t sum = 0.0f;
+                    for (size_t i = 0; i < self->shape_[0]; i++) {
+                        sum += self->at({i, k}) * upstream.at({i, j});
+                    }
+                    other->grad_->at({k, j}) += sum;
+                }
+            }
+        }
+    };
+
     return output_tensor;
 }
 

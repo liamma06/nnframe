@@ -9,3 +9,6 @@ target_include_directories(nnframe PRIVATE include)
 
 add_executable(test_m1 tests/test_m1_tensor.cpp src/tensor.cpp)
 target_include_directories(test_m1 PRIVATE include tests)
+
+add_executable(test_m2 tests/test_m2_autograd.cpp src/tensor.cpp)
+target_include_directories(test_m2 PRIVATE include tests)
