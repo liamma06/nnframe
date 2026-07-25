@@ -191,6 +191,11 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
 
     auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
 
+    //either should match requires grad 
+    if (requires_grad_ || other->requires_grad_){
+        output_tensor->requires_grad_ = true;
+    }
+
     //we don't know the rank so we cant just nest for loops
     //odometer
 
@@ -272,6 +277,8 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
     }
 
     auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
+    if (requires_grad_ || other->requires_grad_)
+        output_tensor->requires_grad_ = true;
     std::vector<size_t> cur_idx(out_rank, 0);
 
     for (size_t i = 0; i < output_tensor->numel(); i++) {
@@ -333,6 +340,8 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
     }
 
     auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
+    if (requires_grad_ || other->requires_grad_)
+        output_tensor->requires_grad_ = true;
     std::vector<size_t> cur_idx(out_rank, 0);
 
     for (size_t i = 0; i < output_tensor->numel(); i++) {
@@ -403,6 +412,8 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
     size_t N = other->shape()[1];
 
     auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{M, N}, 0.0f);
+    if (requires_grad_ || other->requires_grad_)
+        output_tensor->requires_grad_ = true;
 
     /*
         dot product for each element in the output tensor
