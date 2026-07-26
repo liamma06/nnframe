@@ -242,9 +242,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
             basically chain rule 
         */
         if (self->requires_grad_){
-            if (!self->grad_){
-                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
-            }
+            self->init_grad();
             
             for (size_t i = 0; i < self->numel(); i++){
                 self->grad_->mutable_data()[i] += upstream.data()[i]; //add the incoming gradient (read only) to the parent tensor's gradient
@@ -252,9 +250,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         }
 
         if (other->requires_grad_){
-            if (!other->grad_){
-                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
-            }
+            other->init_grad();
 
             for (size_t i = 0; i < other->numel(); i++){
                 other->grad_->mutable_data()[i] += upstream.data()[i];
@@ -305,9 +301,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
     output_tensor->grad_fn_ = [self, other] (const Tensor& upstream){
 
         if (self->requires_grad_){
-            if (!self->grad_){
-                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
-            }
+            self->init_grad();
             
             for (size_t i = 0; i < self->numel(); i++){
                 self->grad_->mutable_data()[i] += upstream.data()[i]; //c = a -b only b negative
@@ -315,9 +309,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
         }
 
         if (other->requires_grad_){
-            if (!other->grad_){
-                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
-            }
+            other->init_grad();
 
             for (size_t i = 0; i < other->numel(); i++){
                 other->grad_->mutable_data()[i] -= upstream.data()[i];
@@ -368,9 +360,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
     output_tensor->grad_fn_ = [self, other] (const Tensor& upstream){
 
         if (self->requires_grad_){
-            if (!self->grad_){
-                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
-            }
+            self->init_grad();
             
             for (size_t i = 0; i < self->numel(); i++){
                 self->grad_->mutable_data()[i] += upstream.data()[i] * other->data()[i]; // c = a * b, dc/da = b, so dL/da = upstream * b
@@ -378,9 +368,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
         }
 
         if (other->requires_grad_){
-            if (!other->grad_){
-                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
-            }
+            other->init_grad();
 
             for (size_t i = 0; i < other->numel(); i++){
                 other->grad_->mutable_data()[i] += upstream.data()[i] * self->data()[i]; // c = a * b if a then dc/da = 1 * db/da derivative multiple the other one
@@ -482,6 +470,9 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
 bool Tensor::requires_grad() const { return requires_grad_; }
 void Tensor::set_requires_grad(bool val) { requires_grad_ = val; }
+void Tensor::set_grad_fn(std::function<void(const Tensor&)> gradfn) { grad_fn_ = gradfn; }
+void Tensor::init_grad() { if (!grad_) grad_ = std::make_shared<Tensor>(shape_, 0.0f); }
+void Tensor::set_inputs(std::vector<TensorPtr> inputs) { inputs_ = inputs; }
 Tensor& Tensor::grad() { return *grad_; }
 
 void Tensor::backward(){

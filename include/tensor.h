@@ -66,6 +66,9 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         bool requires_grad() const;
         Tensor& grad();
         void set_requires_grad(bool val);
+        void set_grad_fn(std::function<void(const Tensor&)> gradfn);
+        void set_inputs(std::vector<TensorPtr> inputs);
+        void init_grad(); // initialize grad_ to zeros if not already set
         void backward();
 
         std::vector<scalar_t>& mutable_data(); //return reference to data vector so it can be modified
