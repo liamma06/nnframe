@@ -6,6 +6,7 @@
 #include "layer.h"
 
 class GELU : public Layer{
+    public:
     TensorPtr forward(const TensorPtr& input) override{
         std::vector<size_t> new_input_shape = input->shape();
         auto output_tensor = std::make_shared<Tensor>(new_input_shape, 0.0f);
