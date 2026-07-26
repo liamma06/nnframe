@@ -21,7 +21,7 @@ A neural network framework built from scratch in C++17. No external math librari
 - **M0** — Project setup (current)
 - **M1** — Tensor (flat buffer + strides, element-wise ops, matmul, reshape, broadcasting)
 - **M2** — Autograd (computation graph, backward pass, gradient checking)
-- **M3** — Layers (Linear, ReLU, sequential container)
+- **M3** — Layers (Linear, ReLU, GELU, sequential container)
 - **M4** — Loss + optimizer (MSE, plain gradient descent)
 - **M5** — Training loop, proof target: XOR
 - **M6** — Transformer support (attention, LayerNorm, positional encoding), proof target: tiny character-level model
