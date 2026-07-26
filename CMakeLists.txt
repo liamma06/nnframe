@@ -12,3 +12,6 @@ target_include_directories(test_m1 PRIVATE include tests)
 
 add_executable(test_m2 tests/test_m2_autograd.cpp src/tensor.cpp)
 target_include_directories(test_m2 PRIVATE include tests)
+
+add_executable(test_m3 tests/test_m3_layers.cpp src/tensor.cpp src/linear.cpp)
+target_include_directories(test_m3 PRIVATE include tests)

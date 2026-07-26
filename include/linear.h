@@ -6,7 +6,7 @@
 
 class Linear : public Layer{
     private: 
-        TensorPtr weight_; 
+        TensorPtr weights_; 
         TensorPtr bias_; 
 
     public:
