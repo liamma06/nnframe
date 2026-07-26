@@ -182,7 +182,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
     for (size_t i = 0; i < out_rank; i ++){
         //basically if the shape don't match or is 1 then bad
         size_t a = ( i < rank()) ? shape_[i] : 1;
-        size_t b = ( i < other->rank()) ? other->shape()[i] : 1;
+        size_t b = ( i >= (out_rank - other->rank())) ? other->shape()[i-(out_rank - other->rank())] : 1;
 
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for addition");
 
@@ -271,7 +271,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 
     for (size_t i = 0; i < out_rank; i++) {
         size_t a = (i < rank()) ? shape_[i] : 1;
-        size_t b = (i < other->rank()) ? other->shape()[i] : 1;
+        size_t b = (i >= (out_rank - other->rank())) ? other->shape()[i - (out_rank - other->rank())] : 1;
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for subtraction");
         new_shape[i] = std::max(a, b);
     }
@@ -334,7 +334,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 
     for (size_t i = 0; i < out_rank; i++) {
         size_t a = (i < rank()) ? shape_[i] : 1;
-        size_t b = (i < other->rank()) ? other->shape()[i] : 1;
+        size_t b = (i >= (out_rank - other->rank())) ? other->shape()[i - (out_rank - other->rank())] : 1;
         assert((a == b || a == 1 || b == 1) && "Tensors are not compatible for multiplication");
         new_shape[i] = std::max(a, b);
     }
