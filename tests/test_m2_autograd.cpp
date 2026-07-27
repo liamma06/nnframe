@@ -1,6 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
-#include "tensor.h"
+#include "core/tensor.h"
 
 TEST_CASE("add backward - grad flows equally to both inputs") {
     auto a = std::make_shared<Tensor>(std::vector<size_t>{2}, std::vector<scalar_t>{1.0f, 2.0f});

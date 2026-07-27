@@ -1,8 +1,8 @@
-#pragma once 
+#pragma once
 #include <vector>
-#include <memory> 
-#include "tensor.h"
-#include "layer.h"
+#include <memory>
+#include "core/tensor.h"
+#include "layers/layer.h"
 
 class ReLu : public Layer{
     public:
@@ -22,18 +22,18 @@ class ReLu : public Layer{
         /*
             need gradient calc here too!
 
-            Took me a while but we don't update params but they still change 
-            so we want gradient to pass through the RELU layer too 
+            Took me a while but we don't update params but they still change
+            so we want gradient to pass through the RELU layer too
 
             Challenges:
             - had to make many public functions to edit the grad_ and grad_fn_ of the input
-            - public vs private 
+            - public vs private
 
         */
 
         auto self = std::const_pointer_cast<Tensor>(input->shared_from_this());
-        output_tensor->set_inputs(std::vector<TensorPtr>{self}); 
-        
+        output_tensor->set_inputs(std::vector<TensorPtr>{self});
+
         output_tensor->set_grad_fn([self](const Tensor& upstream){
             if (self->requires_grad()){
 

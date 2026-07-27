@@ -2,8 +2,8 @@
 #include <vector>
 #include <memory>
 #include <cmath>
-#include "tensor.h"
-#include "layer.h"
+#include "core/tensor.h"
+#include "layers/layer.h"
 
 class GELU : public Layer{
     public:

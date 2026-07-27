@@ -1,4 +1,4 @@
-#include "tensor.h"
+#include "core/tensor.h"
 #include <cassert>
 #include <numeric>
 #include <cmath>

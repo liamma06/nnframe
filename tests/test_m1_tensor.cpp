@@ -1,6 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
-#include "tensor.h"
+#include "core/tensor.h"
 
 TEST_CASE("construct from fill value") {
     auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 3}, 1.0f);
