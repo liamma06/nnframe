@@ -53,6 +53,9 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         TensorPtr add(const TensorPtr& other) const;
         TensorPtr sub(const TensorPtr& other) const;
         TensorPtr mul(const TensorPtr& other) const;
+
+        TensorPtr mean() const;
+
         TensorPtr matmul(const TensorPtr& other) const;
 
         //to make it easier to use math symbols they just link to the tensor functions

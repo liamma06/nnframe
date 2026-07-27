@@ -379,6 +379,35 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
     return output_tensor;
 }
 
+TensorPtr Tensor::mean() const{
+    auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{1}, 0.0f); //one value
+
+    // sum -> mean
+    for (size_t i = 0; i < numel(); i++){
+        output_tensor->mutable_data()[0] += data_->at(i);
+    }
+
+    output_tensor->mutable_data()[0] /= static_cast<scalar_t>(numel()); 
+
+    //grad calculation (1/N) * upstream
+    if (requires_grad_){
+        output_tensor->requires_grad_ = true;
+    }
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+    output_tensor->inputs_ = std::vector<TensorPtr>{self};
+    output_tensor->grad_fn_ = [self](const Tensor& upstream){
+        if (self->requires_grad_){
+            self->init_grad();
+            scalar_t grad_contribution = upstream.data()[0] / static_cast<scalar_t>(self->numel());
+            for (size_t i = 0; i < self->numel(); i++){
+                self->grad_->mutable_data()[i] += grad_contribution;
+            }
+        }
+    };
+
+    return output_tensor;
+}
+
 bool Tensor::allclose(const Tensor& other, scalar_t eps) const {
     assert(shape_ == other.shape_ && "Shapes must match for allclose");
     for (size_t i = 0; i < data_->size(); i++) {
@@ -386,6 +415,8 @@ bool Tensor::allclose(const Tensor& other, scalar_t eps) const {
     }
     return true;
 }
+
+
 
 TensorPtr Tensor::operator+(const TensorPtr& other) const { return add(other); }
 TensorPtr Tensor::operator-(const TensorPtr& other) const { return sub(other); }
