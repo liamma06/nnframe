@@ -15,3 +15,6 @@ target_include_directories(test_m2 PRIVATE include tests)
 
 add_executable(test_m3 tests/test_m3_layers.cpp src/tensor.cpp src/linear.cpp)
 target_include_directories(test_m3 PRIVATE include tests)
+
+add_executable(test_m4 tests/test_m4_loss_optim.cpp src/tensor.cpp src/linear.cpp)
+target_include_directories(test_m4 PRIVATE include tests)
