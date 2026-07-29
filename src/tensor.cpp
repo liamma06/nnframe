@@ -541,3 +541,60 @@ void Tensor::backward(){
         }
     }
 }
+
+//ATTENTION 
+
+TensorPtr Tensor::softmax(size_t dim) const{
+    assert(dim < rank() && "Dimension out of bounds for softmax");
+
+    TensorPtr output_tensor = std::make_shared<Tensor>(shape_, 0.0f);
+
+    
+    for (size_t i = 0; i < shape_[0]; i++){
+
+        //exp
+        for (size_t j = 0; j < shape_[1]; j++){
+            
+            output_tensor->at({i, j}) = std::exp(at({i, j}));
+        };
+
+        //sum
+        scalar_t row_sum = 0.0f;
+        for (size_t j = 0; j < shape_[1]; j++){
+            
+            row_sum += output_tensor->at({i, j});
+        }
+
+        //normalize
+        for (size_t j = 0; j < shape_[1]; j++){
+            
+            output_tensor->at({i, j}) /= row_sum;
+        }
+    };
+
+    if (requires_grad_){
+        output_tensor->set_requires_grad(true);
+    }
+
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+    output_tensor->set_inputs(std::vector<TensorPtr>{self});
+    output_tensor->set_grad_fn([self, output_tensor](const Tensor& upstream){
+
+        if (self->requires_grad()){
+            self->init_grad();
+
+            for (size_t i = 0; i < self->shape_[0]; i++){
+                scalar_t dot_product = 0.0f;
+                for (size_t j = 0; j < self->shape_[1]; j++){
+                    dot_product += upstream.at({i, j}) * output_tensor->at({i, j});
+                }
+
+                for (size_t j = 0; j < self->shape_[1]; j++){
+                    self->grad().mutable_data()[i * self->shape_[1] + j] += output_tensor->at({i, j}) * (upstream.at({i, j}) - dot_product);
+                }
+            }
+        }
+    });
+
+    return output_tensor;
+}

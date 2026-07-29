@@ -75,4 +75,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         void backward();
 
         std::vector<scalar_t>& mutable_data(); //return reference to data vector so it can be modified
+
+        //attention
+        TensorPtr softmax(size_t dim = 1 ) const; 
 };
