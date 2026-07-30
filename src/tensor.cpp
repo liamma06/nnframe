@@ -31,6 +31,16 @@ Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> 
     offset_ = offset;
 }
 
+//factory methods 
+TensorPtr Tensor::create(std::vector<size_t> shape, scalar_t fill) {
+    return std::make_shared<Tensor>(shape, fill);
+}
+
+TensorPtr Tensor::zeros(std::vector<size_t> shape) {
+    return Tensor::create(shape);
+}
+
+
 //hlper stride func 
 size_t Tensor::compute_strides() {
     strides_.resize(shape_.size()); //match shape size
@@ -599,10 +609,3 @@ TensorPtr Tensor::softmax(size_t dim) const{
     return output_tensor;
 }
 
-TensorPtr Tensor::create(std::vector<size_t> shape, scalar_t fill) {
-    return std::make_shared<Tensor>(shape, fill);
-}
-
-TensorPtr Tensor::zeros(std::vector<size_t> shape) {
-    return Tensor::create(shape);
-}
