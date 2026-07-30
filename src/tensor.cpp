@@ -189,7 +189,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         new_shape[i] = std::max(a, b); //take the larger shape for the new tensor
     }
 
-    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
+    auto output_tensor = Tensor::create(new_shape);
 
     //either should match requires grad 
     if (requires_grad_ || other->requires_grad_){
@@ -272,7 +272,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
         new_shape[i] = std::max(a, b);
     }
 
-    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
+    auto output_tensor = Tensor::create(new_shape);
     if (requires_grad_ || other->requires_grad_)
         output_tensor->requires_grad_ = true;
     std::vector<size_t> cur_idx(out_rank, 0);
@@ -331,7 +331,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
         new_shape[i] = std::max(a, b);
     }
 
-    auto output_tensor = std::make_shared<Tensor>(new_shape, 0.0f);
+    auto output_tensor = Tensor::create(new_shape);
     if (requires_grad_ || other->requires_grad_)
         output_tensor->requires_grad_ = true;
     std::vector<size_t> cur_idx(out_rank, 0);
@@ -380,7 +380,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 }
 
 TensorPtr Tensor::mean() const{
-    auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{1}, 0.0f); //one value
+    auto output_tensor = Tensor::create({1}); //one value
 
     // sum -> mean
     for (size_t i = 0; i < numel(); i++){
@@ -430,7 +430,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
     size_t K = shape_[1];
     size_t N = other->shape()[1];
 
-    auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{M, N}, 0.0f);
+    auto output_tensor = Tensor::create({M, N});
     if (requires_grad_ || other->requires_grad_)
         output_tensor->requires_grad_ = true;
 
@@ -461,7 +461,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
         
         if (self->requires_grad_) {
             if (!self->grad_) {
-                self->grad_ = std::make_shared<Tensor>(self->shape_, 0.0f);
+                self->grad_ = Tensor::create(self->shape_);
             }
 
             // Gradient w.r.t self: upstream * other^T
@@ -478,7 +478,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
         if (other->requires_grad_) {
             if (!other->grad_) {
-                other->grad_ = std::make_shared<Tensor>(other->shape_, 0.0f);
+                other->grad_ = Tensor::create(other->shape_);
             }
 
             // Gradient w.r.t other: self^T * upstream
@@ -502,14 +502,14 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 bool Tensor::requires_grad() const { return requires_grad_; }
 void Tensor::set_requires_grad(bool val) { requires_grad_ = val; }
 void Tensor::set_grad_fn(std::function<void(const Tensor&)> gradfn) { grad_fn_ = gradfn; }
-void Tensor::init_grad() { if (!grad_) grad_ = std::make_shared<Tensor>(shape_, 0.0f); }
+void Tensor::init_grad() { if (!grad_) grad_ = Tensor::create(shape_); }
 void Tensor::set_inputs(std::vector<TensorPtr> inputs) { inputs_ = inputs; }
 Tensor& Tensor::grad() { return *grad_; }
 
 void Tensor::backward(){
 
     //inital gradient just 1 
-    grad_ = std::make_shared<Tensor>(shape_, 1.0f); 
+    grad_ = Tensor::create(shape_, 1.0f);
 
     std::vector<Tensor*> order_list;
     std::unordered_set<Tensor*> visited; 
@@ -547,7 +547,7 @@ void Tensor::backward(){
 TensorPtr Tensor::softmax(size_t dim) const{
     assert(dim < rank() && "Dimension out of bounds for softmax");
 
-    TensorPtr output_tensor = std::make_shared<Tensor>(shape_, 0.0f);
+    TensorPtr output_tensor = Tensor::create(shape_);
 
     
     for (size_t i = 0; i < shape_[0]; i++){
@@ -597,4 +597,12 @@ TensorPtr Tensor::softmax(size_t dim) const{
     });
 
     return output_tensor;
+}
+
+TensorPtr Tensor::create(std::vector<size_t> shape, scalar_t fill) {
+    return std::make_shared<Tensor>(shape, fill);
+}
+
+TensorPtr Tensor::zeros(std::vector<size_t> shape) {
+    return Tensor::create(shape);
 }

@@ -9,7 +9,7 @@ class GELU : public Layer{
     public:
     TensorPtr forward(const TensorPtr& input) override{
         std::vector<size_t> new_input_shape = input->shape();
-        auto output_tensor = std::make_shared<Tensor>(new_input_shape, 0.0f);
+        auto output_tensor = Tensor::create(new_input_shape);
 
         for(size_t i = 0; i < input->numel(); i++){
             scalar_t x = input->mutable_data()[i];

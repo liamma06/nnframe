@@ -16,9 +16,9 @@ class LayerNorm: public Layer{
         LayerNorm(size_t normalized_shape){
             normalized_shape_ = normalized_shape;
 
-            gamma_ = std::make_shared<Tensor>(std::vector<size_t>{normalized_shape_}, 1.0f); 
-            beta_ = std::make_shared<Tensor>(std::vector<size_t>{normalized_shape_}, 0.0f);
-            
+            gamma_ = Tensor::create({normalized_shape_}, 1.0f);
+            beta_ = Tensor::zeros({normalized_shape_});
+
             gamma_->set_requires_grad(true);
             beta_->set_requires_grad(true);
         };
@@ -35,7 +35,7 @@ class LayerNorm: public Layer{
             size_t seq_len = input->shape()[0];
             size_t embed_dim = input->shape()[1];
 
-            auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{seq_len, embed_dim}, 0.0f);
+            auto output_tensor = Tensor::create({seq_len, embed_dim});
 
             for (size_t i = 0; i < seq_len; i++){
                 scalar_t mean = 0.0f; 

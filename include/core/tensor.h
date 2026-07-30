@@ -77,5 +77,9 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         std::vector<scalar_t>& mutable_data(); //return reference to data vector so it can be modified
 
         //attention
-        TensorPtr softmax(size_t dim = 1 ) const; 
+        TensorPtr softmax(size_t dim = 1 ) const;
+
+        // factory methods
+        static TensorPtr create(std::vector<size_t> shape, scalar_t fill = 0.0f);
+        static TensorPtr zeros(std::vector<size_t> shape);
 };

@@ -20,7 +20,7 @@ class Embed: public Layer{
             vocab_size_ = vocab_size;
             embedding_dim_ = embedding_dim;
 
-            embedding_matrix_ = std::make_shared<Tensor>(std::vector<size_t>{vocab_size_, embedding_dim_}, 0.0f);
+            embedding_matrix_ = Tensor::create({vocab_size_, embedding_dim_});
             embedding_matrix_->set_requires_grad(true);
 
             //random initialize
@@ -43,7 +43,7 @@ class Embed: public Layer{
                 output: [seq_length, embedding_dim]
             */
             std::vector<size_t> new_input_shape = input->shape();
-            auto output_tensor = std::make_shared<Tensor>(std::vector<size_t>{new_input_shape[0], embedding_dim_}, 0.0f);
+            auto output_tensor = Tensor::create({new_input_shape[0], embedding_dim_});
 
             for (size_t i = 0; i < new_input_shape[0]; i++){
                 size_t idx = static_cast<size_t>(input->at({i}));
