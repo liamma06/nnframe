@@ -7,6 +7,7 @@
 #include "modules/transformer_block.h"
 #include "modules/pos_embed.h"
 #include "modules/char_model.h"
+#include "loss/cross_entrop.h"
 #include <cmath>
 
 // ── Softmax ──────────────────────────────────────────────────────────────────
@@ -195,6 +196,43 @@ TEST_CASE("charmodel output shape is [seq_len, vocab_size]") {
     auto out = model.forward(ids);
     CHECK(out->shape()[0] == 4);
     CHECK(out->shape()[1] == 16);
+}
+
+// ── CrossEntropy ──────────────────────────────────────────────────────────────
+
+TEST_CASE("cross entropy loss is positive scalar") {
+    CrossEntropy ce;
+    auto logits = std::make_shared<Tensor>(
+        std::vector<size_t>{3, 4},
+        std::vector<scalar_t>{1.0f,2.0f,3.0f,4.0f, 1.0f,2.0f,3.0f,4.0f, 1.0f,2.0f,3.0f,4.0f}
+    );
+    logits->set_requires_grad(true);
+    auto targets = std::make_shared<Tensor>(
+        std::vector<size_t>{3},
+        std::vector<scalar_t>{0.0f, 2.0f, 3.0f}
+    );
+    auto loss = ce.forward(logits, targets);
+    CHECK(loss->data()[0] > 0.0f);
+    CHECK(loss->shape()[0] == 1);
+}
+
+TEST_CASE("cross entropy backward flows to logits") {
+    CrossEntropy ce;
+    auto logits = std::make_shared<Tensor>(
+        std::vector<size_t>{2, 4},
+        std::vector<scalar_t>{1.0f,2.0f,3.0f,4.0f, 0.5f,1.5f,2.5f,0.1f}
+    );
+    logits->set_requires_grad(true);
+    auto targets = std::make_shared<Tensor>(
+        std::vector<size_t>{2},
+        std::vector<scalar_t>{1.0f, 3.0f}
+    );
+    auto loss = ce.forward(logits, targets);
+    loss->backward();
+    bool any_nonzero = false;
+    for (size_t i = 0; i < logits->numel(); i++)
+        if (std::abs(logits->grad().data()[i]) > 1e-7f) any_nonzero = true;
+    CHECK(any_nonzero);
 }
 
 TEST_CASE("charmodel has parameters") {
