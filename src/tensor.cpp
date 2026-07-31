@@ -609,3 +609,25 @@ TensorPtr Tensor::softmax(size_t dim) const{
     return output_tensor;
 }
 
+TensorPtr Tensor::log() const {
+    auto output_tensor = Tensor::create(shape_);
+    for (size_t i = 0; i < numel(); i++)
+        output_tensor->mutable_data()[i] = std::log(data()[i]);
+
+    if (requires_grad_)
+        output_tensor->set_requires_grad(true);
+
+    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+    output_tensor->set_inputs({self});
+    // d/dx log(x) = 1/x
+    output_tensor->set_grad_fn([self](const Tensor& upstream) {
+        if (self->requires_grad()) {
+            self->init_grad();
+            for (size_t i = 0; i < self->numel(); i++)
+                self->grad().mutable_data()[i] += upstream.data()[i] / self->data()[i];
+        }
+    });
+
+    return output_tensor;
+}
+
