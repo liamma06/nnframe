@@ -5,6 +5,7 @@
 #include "modules/layernorm.h"
 #include "modules/attention.h"
 #include "modules/transformer_block.h"
+#include "modules/pos_embed.h"
 #include <cmath>
 
 // ── Softmax ──────────────────────────────────────────────────────────────────
@@ -133,6 +134,27 @@ TEST_CASE("attention output shape matches input") {
 TEST_CASE("attention has 4 parameter matrices") {
     SelfAttention attn(8, 1);
     CHECK(attn.parameters().size() == 4);
+}
+
+// ── PositionalEncoding ───────────────────────────────────────────────────────
+
+TEST_CASE("positional encoding output shape matches input") {
+    PositionalEmbed pe;
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, 0.0f);
+    auto out = pe.forward(x);
+    CHECK(out->shape()[0] == 4);
+    CHECK(out->shape()[1] == 8);
+}
+
+TEST_CASE("positional encoding differs across positions") {
+    PositionalEmbed pe;
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, 0.0f);
+    auto out = pe.forward(x);
+    // row 0 and row 1 should differ
+    bool any_different = false;
+    for (size_t j = 0; j < 8; j++)
+        if (std::abs(out->data()[j] - out->data()[8 + j]) > 1e-6f) any_different = true;
+    CHECK(any_different);
 }
 
 // ── TransformerBlock ──────────────────────────────────────────────────────────

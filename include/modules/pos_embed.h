@@ -1,0 +1,37 @@
+#pragma once
+#include <vector>
+#include <memory>
+#include "core/tensor.h"
+#include "modules/layer.h"
+#include "cmath"
+
+class PositionalEmbed : public Layer{
+    public:
+        TensorPtr forward(const TensorPtr& input) override{
+            /*
+                input: [seq_length, embed_dim]
+                output: [seq_length, embed_dim]
+                Positional encoding is added to the input embeddings to provide information about the position of each token in the sequence. 
+                The encoding is based on sine and cosine functions of different frequencies.
+                https://www.geeksforgeeks.org/nlp/positional-encoding-in-transformers/
+            */
+            size_t seq_length = input->shape()[0];
+            size_t embed_dim = input->shape()[1];
+
+            auto output_tensor = Tensor::create({seq_length, embed_dim});
+
+            for (size_t pos = 0; pos < seq_length; pos++){
+                for (size_t i = 0; i < embed_dim; i++){
+                    if (i % 2 == 0){
+                        output_tensor->at({pos, i}) = std::sin(pos / std::pow(10000.0f, static_cast<float>(i) / embed_dim));
+                    } else {
+                        output_tensor->at({pos, i}) = std::cos(pos / std::pow(10000.0f, static_cast<float>(i - 1) / embed_dim));
+                    }
+                }
+            }
+
+            return input->add(output_tensor);
+        }
+
+        std::vector<TensorPtr> parameters() const override { return {}; }
+};
