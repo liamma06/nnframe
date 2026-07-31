@@ -6,6 +6,7 @@
 #include "modules/attention.h"
 #include "modules/transformer_block.h"
 #include "modules/pos_embed.h"
+#include "modules/char_model.h"
 #include <cmath>
 
 // ── Softmax ──────────────────────────────────────────────────────────────────
@@ -181,4 +182,22 @@ TEST_CASE("transformer block output differs from input") {
     for (size_t i = 0; i < out->numel(); i++)
         if (std::abs(out->data()[i] - x->data()[i]) > 1e-6f) any_different = true;
     CHECK(any_different);
+}
+
+// ── CharModel ─────────────────────────────────────────────────────────────────
+
+TEST_CASE("charmodel output shape is [seq_len, vocab_size]") {
+    CharModel model(16, 8, 1, 2); // vocab=16, embed=8, heads=1, blocks=2
+    auto ids = std::make_shared<Tensor>(
+        std::vector<size_t>{4},
+        std::vector<scalar_t>{0.0f, 1.0f, 2.0f, 3.0f}
+    );
+    auto out = model.forward(ids);
+    CHECK(out->shape()[0] == 4);
+    CHECK(out->shape()[1] == 16);
+}
+
+TEST_CASE("charmodel has parameters") {
+    CharModel model(16, 8, 1, 2);
+    CHECK(model.parameters().size() > 0);
 }
