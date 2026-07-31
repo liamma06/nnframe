@@ -4,6 +4,7 @@
 #include "modules/embed.h"
 #include "modules/layernorm.h"
 #include "modules/attention.h"
+#include "modules/transformer_block.h"
 #include <cmath>
 
 // ── Softmax ──────────────────────────────────────────────────────────────────
@@ -132,4 +133,30 @@ TEST_CASE("attention output shape matches input") {
 TEST_CASE("attention has 4 parameter matrices") {
     SelfAttention attn(8, 1);
     CHECK(attn.parameters().size() == 4);
+}
+
+// ── TransformerBlock ──────────────────────────────────────────────────────────
+
+TEST_CASE("transformer block output shape matches input") {
+    TransformerBlock block(8, 1);
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, 0.1f);
+    auto out = block.forward(x);
+    CHECK(out->shape()[0] == 4);
+    CHECK(out->shape()[1] == 8);
+}
+
+TEST_CASE("transformer block has correct parameter count") {
+    TransformerBlock block(8, 1);
+    // attn: 4, ln1: 2, ln2: 2, linear1: 2, linear2: 2
+    CHECK(block.parameters().size() == 12);
+}
+
+TEST_CASE("transformer block output differs from input") {
+    TransformerBlock block(8, 1);
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, 0.1f);
+    auto out = block.forward(x);
+    bool any_different = false;
+    for (size_t i = 0; i < out->numel(); i++)
+        if (std::abs(out->data()[i] - x->data()[i]) > 1e-6f) any_different = true;
+    CHECK(any_different);
 }
