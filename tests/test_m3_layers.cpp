@@ -1,10 +1,10 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "core/tensor.h"
-#include "layers/linear.h"
-#include "layers/relu.h"
-#include "layers/gelu.h"
-#include "layers/sequential.h"
+#include "modules/linear.h"
+#include "modules/relu.h"
+#include "modules/gelu.h"
+#include "modules/sequential.h"
 
 TEST_CASE("linear forward shape") {
     Linear lin(4, 8);

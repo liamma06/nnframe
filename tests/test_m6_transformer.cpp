@@ -1,9 +1,9 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "core/tensor.h"
-#include "layers/embed.h"
-#include "layers/layernorm.h"
-#include "layers/attention.h"
+#include "modules/embed.h"
+#include "modules/layernorm.h"
+#include "modules/attention.h"
 #include <cmath>
 
 // ── Softmax ──────────────────────────────────────────────────────────────────

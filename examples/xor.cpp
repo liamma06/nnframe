@@ -1,7 +1,7 @@
 #include "core/tensor.h"
-#include "layers/linear.h"
-#include "layers/relu.h"
-#include "layers/sequential.h"
+#include "modules/linear.h"
+#include "modules/relu.h"
+#include "modules/sequential.h"
 #include "loss/mse.h"
 #include "optim/adamw.h"
 #include <iostream>

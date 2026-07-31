@@ -1,4 +1,4 @@
-#include "layers/linear.h"
+#include "modules/linear.h"
 #include <random>
 
 std::mt19937 rng(42);

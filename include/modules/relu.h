@@ -2,7 +2,7 @@
 #include <vector>
 #include <memory>
 #include "core/tensor.h"
-#include "layers/layer.h"
+#include "modules/layer.h"
 
 class ReLu : public Layer{
     public:

@@ -3,7 +3,7 @@
 #include <memory>
 #include <cmath>
 #include "core/tensor.h"
-#include "layers/layer.h"
+#include "modules/layer.h"
 #include <cassert>
 
 class SelfAttention: public Layer{
