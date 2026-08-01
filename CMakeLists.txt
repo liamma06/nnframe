@@ -23,4 +23,7 @@ add_executable(xor examples/xor.cpp src/tensor.cpp src/linear.cpp)
 target_include_directories(xor PRIVATE include)
 
 add_executable(test_m6 tests/test_m6_transformer.cpp src/tensor.cpp src/linear.cpp src/attention.cpp src/transformer_block.cpp)
+
+add_executable(char_lm examples/char_lm.cpp src/tensor.cpp src/linear.cpp src/attention.cpp src/transformer_block.cpp)
+target_include_directories(char_lm PRIVATE include)
 target_include_directories(test_m6 PRIVATE include tests)
