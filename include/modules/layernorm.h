@@ -36,6 +36,7 @@ class LayerNorm: public Layer{
             size_t embed_dim = input->shape()[1];
 
             auto output_tensor = Tensor::create({seq_len, embed_dim});
+            output_tensor->set_requires_grad(true);
 
             for (size_t i = 0; i < seq_len; i++){
                 scalar_t mean = 0.0f; 

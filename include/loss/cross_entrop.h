@@ -28,7 +28,8 @@ class CrossEntropy: public Loss{
             for (size_t i = 0; i < seq_len; i++){
                 size_t target_class = static_cast<size_t>(targets->at({i}));
                 assert(target_class < vocab_size && "Target class index out of bounds");
-                correct_probs->at({i, 0}) = softmax_probs->at({i, target_class});
+        
+                correct_probs->at({i, 0}) = std::max(softmax_probs->at({i, target_class}), 1e-7f);
             }
 
             //autograd (BRUH)
