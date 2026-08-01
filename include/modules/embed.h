@@ -23,9 +23,10 @@ class Embed: public Layer{
             embedding_matrix_ = Tensor::create({vocab_size_, embedding_dim_});
             embedding_matrix_->set_requires_grad(true);
 
-            //random initialize
+            //random initialize (Xavier-style scale)
             std::mt19937 rng(42);
-            std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+            float scale = 1.0f / std::sqrt(static_cast<float>(embedding_dim));
+            std::uniform_real_distribution<float> dist(-scale, scale);
             for (size_t i = 0; i < embedding_matrix_->numel(); i++){
                 embedding_matrix_->mutable_data()[i] = dist(rng); 
             }

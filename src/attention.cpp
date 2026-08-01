@@ -5,7 +5,9 @@
 
 SelfAttention::SelfAttention(size_t embed_dim, size_t num_heads){
     std::mt19937 rng(42);
-    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    // Xavier-style scale 
+    float scale = 1.0f / std::sqrt(static_cast<float>(embed_dim));
+    std::uniform_real_distribution<float> dist(-scale, scale);
 
     assert(embed_dim % num_heads == 0 && "Embedding dimension must be divisible by number of heads");
     embed_dim_ = embed_dim;
