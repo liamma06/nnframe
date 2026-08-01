@@ -174,7 +174,22 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
 
 TensorPtr Tensor::transpose() const {
     assert(rank() == 2 && "transpose is for 2D tensors, use permute for higher ranks");
-    return permute({1, 0});
+    auto result = permute({1, 0});
+    if (requires_grad_) {
+        result->set_requires_grad(true);
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        result->set_inputs({self});
+        // grad of transpose is transpose of upstream gradient
+        result->set_grad_fn([self](const Tensor& upstream) {
+            if (self->requires_grad()) {
+                self->init_grad();
+                for (size_t i = 0; i < self->shape()[0]; i++)
+                    for (size_t j = 0; j < self->shape()[1]; j++)
+                        self->grad().mutable_data()[i * self->shape()[1] + j] += upstream.at({j, i});
+            }
+        });
+    }
+    return result;
 }
 
 std::vector<scalar_t>& Tensor::mutable_data(){
@@ -253,18 +268,14 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         */
         if (self->requires_grad_){
             self->init_grad();
-            
-            for (size_t i = 0; i < self->numel(); i++){
-                self->grad_->mutable_data()[i] += upstream.data()[i]; //add the incoming gradient (read only) to the parent tensor's gradient
-            }
+            for (size_t i = 0; i < upstream.numel(); i++)
+                self->grad_->mutable_data()[i % self->numel()] += upstream.data()[i];
         }
 
         if (other->requires_grad_){
             other->init_grad();
-
-            for (size_t i = 0; i < other->numel(); i++){
-                other->grad_->mutable_data()[i] += upstream.data()[i];
-            }
+            for (size_t i = 0; i < upstream.numel(); i++)
+                other->grad_->mutable_data()[i % other->numel()] += upstream.data()[i];
         }
     };
 
@@ -312,18 +323,14 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 
         if (self->requires_grad_){
             self->init_grad();
-            
-            for (size_t i = 0; i < self->numel(); i++){
-                self->grad_->mutable_data()[i] += upstream.data()[i]; //c = a -b only b negative
-            }
+            for (size_t i = 0; i < upstream.numel(); i++)
+                self->grad_->mutable_data()[i % self->numel()] += upstream.data()[i];
         }
 
         if (other->requires_grad_){
             other->init_grad();
-
-            for (size_t i = 0; i < other->numel(); i++){
-                other->grad_->mutable_data()[i] -= upstream.data()[i];
-            }
+            for (size_t i = 0; i < upstream.numel(); i++)
+                other->grad_->mutable_data()[i % other->numel()] -= upstream.data()[i];
         }
     };
 
@@ -371,17 +378,25 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 
         if (self->requires_grad_){
             self->init_grad();
-            
             for (size_t i = 0; i < self->numel(); i++){
-                self->grad_->mutable_data()[i] += upstream.data()[i] * other->data()[i]; // c = a * b, dc/da = b, so dL/da = upstream * b
+                // if other is a broadcasted scalar always use index 0
+                size_t j = (other->numel() == 1) ? 0 : i;
+                self->grad_->mutable_data()[i] += upstream.data()[i] * other->data()[j];
             }
         }
 
         if (other->requires_grad_){
             other->init_grad();
-
-            for (size_t i = 0; i < other->numel(); i++){
-                other->grad_->mutable_data()[i] += upstream.data()[i] * self->data()[i]; // c = a * b if a then dc/da = 1 * db/da derivative multiple the other one
+            if (other->numel() == 1) {
+                scalar_t sum = 0.0f;
+                for (size_t i = 0; i < self->numel(); i++)
+                    sum += upstream.data()[i] * self->data()[i];
+                other->grad_->mutable_data()[0] += sum;
+            } else {
+                for (size_t i = 0; i < other->numel(); i++){
+                    size_t j = (self->numel() == 1) ? 0 : i;
+                    other->grad_->mutable_data()[i] += upstream.data()[j] * self->data()[j];
+                }
             }
         }
     };
@@ -562,22 +577,24 @@ TensorPtr Tensor::softmax(size_t dim) const{
     
     for (size_t i = 0; i < shape_[0]; i++){
 
+        // subtract row max (prevents exp overflow -> NaN)
+        scalar_t row_max = at({i, 0});
+        for (size_t j = 1; j < shape_[1]; j++)
+            row_max = std::max(row_max, at({i, j}));
+
         //exp
         for (size_t j = 0; j < shape_[1]; j++){
-            
-            output_tensor->at({i, j}) = std::exp(at({i, j}));
+            output_tensor->at({i, j}) = std::exp(at({i, j}) - row_max);
         };
 
         //sum
         scalar_t row_sum = 0.0f;
         for (size_t j = 0; j < shape_[1]; j++){
-            
             row_sum += output_tensor->at({i, j});
         }
 
         //normalize
         for (size_t j = 0; j < shape_[1]; j++){
-            
             output_tensor->at({i, j}) /= row_sum;
         }
     };
