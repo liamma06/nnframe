@@ -156,7 +156,28 @@ TensorPtr Tensor::reshape(std::vector<size_t> new_shape) const {
         stride *= new_shape[i];
     }
 
-    return TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+
+    /*
+        Why need autograd here?
+        because we creating a new tensor adn want gradient to flow through the new tensor too.
+    */
+    if (requires_grad_){
+        result -> set_requires_grad(true);
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+
+        result->set_inputs({self});
+        result->set_grad_fn([self](const Tensor& upstream){
+            if (self->requires_grad()){
+                self->init_grad();
+                for (size_t i = 0; i < self->numel(); i++){
+                    self->grad().mutable_data()[i] += upstream.data()[i];
+                }
+            }
+        });
+    }
+
+    return result;
 }
 
 TensorPtr Tensor::permute(std::vector<size_t> axes) const{
