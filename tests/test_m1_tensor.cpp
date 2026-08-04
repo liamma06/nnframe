@@ -45,6 +45,69 @@ TEST_CASE("reshape returns view with same buffer") {
     CHECK(t->at({0, 0}) == 99.0f);
 }
 
+TEST_CASE("reshape splits last dim into heads (rank-3)") {
+    // [seq=2, embed_dim=4] -> [seq=2, num_heads=2, head_dim=2], same layout as multi-head split
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 4}, std::vector<scalar_t>{1, 2, 3, 4, 10, 20, 30, 40});
+    auto r = t->reshape({2, 2, 2});
+    CHECK(r->shape()[0] == 2);
+    CHECK(r->shape()[1] == 2);
+    CHECK(r->shape()[2] == 2);
+    // token 0, head 0 and head 1
+    CHECK(r->at({0, 0, 0}) == 1.0f);
+    CHECK(r->at({0, 0, 1}) == 2.0f);
+    CHECK(r->at({0, 1, 0}) == 3.0f);
+    CHECK(r->at({0, 1, 1}) == 4.0f);
+    // token 1, head 0 and head 1
+    CHECK(r->at({1, 0, 0}) == 10.0f);
+    CHECK(r->at({1, 0, 1}) == 20.0f);
+    CHECK(r->at({1, 1, 0}) == 30.0f);
+    CHECK(r->at({1, 1, 1}) == 40.0f);
+}
+
+TEST_CASE("permute 2D swap matches manual transpose") {
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 3}, std::vector<scalar_t>{1, 2, 3, 4, 5, 6});
+    auto p = t->permute({1, 0});
+    CHECK(p->shape()[0] == 3);
+    CHECK(p->shape()[1] == 2);
+    // p[i,j] == t[j,i]
+    for (size_t i = 0; i < 3; i++)
+        for (size_t j = 0; j < 2; j++)
+            CHECK(p->at({i, j}) == t->at({j, i}));
+}
+
+TEST_CASE("permute rank-3 puts head dim first, matches manual construction") {
+    // [seq=2, num_heads=2, head_dim=2] -> [num_heads=2, seq=2, head_dim=2]
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 2}, std::vector<scalar_t>{1, 2, 3, 4, 10, 20, 30, 40});
+    auto p = t->permute({1, 0, 2});
+    CHECK(p->shape()[0] == 2);
+    CHECK(p->shape()[1] == 2);
+    CHECK(p->shape()[2] == 2);
+    // head 0, all tokens
+    CHECK(p->at({0, 0, 0}) == 1.0f);
+    CHECK(p->at({0, 0, 1}) == 2.0f);
+    CHECK(p->at({0, 1, 0}) == 10.0f);
+    CHECK(p->at({0, 1, 1}) == 20.0f);
+    // head 1, all tokens
+    CHECK(p->at({1, 0, 0}) == 3.0f);
+    CHECK(p->at({1, 0, 1}) == 4.0f);
+    CHECK(p->at({1, 1, 0}) == 30.0f);
+    CHECK(p->at({1, 1, 1}) == 40.0f);
+}
+
+TEST_CASE("permute 3-way rotation matches formula out_idx[j] = self_idx[axes[j]]") {
+    // not a simple 2-axis swap - this is the case the naive "scatter" bug got wrong
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 2}, std::vector<scalar_t>{1, 2, 3, 4, 5, 6, 7, 8});
+    auto p = t->permute({2, 0, 1});
+    CHECK(p->shape()[0] == 2);
+    CHECK(p->shape()[1] == 2);
+    CHECK(p->shape()[2] == 2);
+    // p->at({q,r,s}) should equal t->at({r,s,q})  (self_idx[axes[j]] = out_idx[j] rearranged)
+    for (size_t q = 0; q < 2; q++)
+        for (size_t r = 0; r < 2; r++)
+            for (size_t s = 0; s < 2; s++)
+                CHECK(p->at({q, r, s}) == t->at({r, s, q}));
+}
+
 TEST_CASE("element-wise add same shape") {
     auto a = std::make_shared<Tensor>(std::vector<size_t>{2, 2}, std::vector<scalar_t>{1, 2, 3, 4});
     auto b = std::make_shared<Tensor>(std::vector<size_t>{2, 2}, std::vector<scalar_t>{5, 6, 7, 8});
