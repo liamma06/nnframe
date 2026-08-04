@@ -4,6 +4,17 @@
 #include <cmath>
 #include <unordered_set>
 
+namespace {
+    //func to see if we can increment index (odometer style)
+    bool increment_index(std::vector<size_t>& idx, const std::vector<size_t>& shape){
+        for (int i = idx.size() - 1; i >= 0 ; i--){
+            if (++idx[i] < shape[i]) return true;
+            idx[i] = 0;
+        }
+        return false;
+    }
+}
+
 Tensor::Tensor(std::vector<size_t> shape, scalar_t fill){
     shape_ = shape;
     offset_ = 0;
@@ -246,10 +257,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
         output_tensor->at(cur_idx) = at(a_idx) + other->at(b_idx);
 
         //does the odometer incrementing thing to get the next index for the output tensor
-        for (int k = out_rank - 1; k >= 0; k--) {
-            if (++cur_idx[k] < new_shape[k]) break;
-            cur_idx[k] = 0;
-        }
+        increment_index(cur_idx, new_shape);
     }
 
     /*
@@ -310,10 +318,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 
         output_tensor->at(cur_idx) = at(a_idx) - other->at(b_idx);
 
-        for (int k = out_rank - 1; k >= 0; k--) {
-            if (++cur_idx[k] < new_shape[k]) break;
-            cur_idx[k] = 0;
-        }
+        increment_index(cur_idx, new_shape);
     }
 
     auto self = std::const_pointer_cast<Tensor>(shared_from_this());
@@ -365,10 +370,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 
         output_tensor->at(cur_idx) = at(a_idx) * other->at(b_idx);
 
-        for (int k = out_rank - 1; k >= 0; k--) {
-            if (++cur_idx[k] < new_shape[k]) break;
-            cur_idx[k] = 0;
-        }
+        increment_index(cur_idx, new_shape);
     }
 
     auto self = std::const_pointer_cast<Tensor>(shared_from_this());
