@@ -201,7 +201,42 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
         new_shape[i] = shape_[axes[i]];
         new_strides[i] = strides_[axes[i]];
     }
-    return TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+
+    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+
+    if (requires_grad_){
+        result->set_requires_grad(true);
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        result->set_inputs({self});
+        result->set_grad_fn([self, axes](const Tensor& upstream){
+            if (self->requires_grad()){
+                self->init_grad();
+
+                /*
+                    We need to map upstream grad into the new tensor
+                    but we switched the axes so we need to permute the indices back to the original tensor's order
+                    and add them into the correct spots 
+                */
+                for (size_t i = 0; i < self->numel(); i++){
+                    std::vector<size_t> self_idx(self->rank());
+                    size_t remaining = i;
+                    for (int j = self->rank() - 1; j >= 0; j--){
+                        self_idx[j] = remaining % self->shape()[j];
+                        remaining /= self->shape()[j];
+                    }
+
+                    std::vector<size_t> out_idx(self->rank());
+                    for (size_t j = 0; j < axes.size(); j++){
+                        out_idx[j] = self_idx[axes[j]];
+                    }
+
+                    self->grad().mutable_data()[i] += upstream.at(out_idx);
+                }
+            }
+        });
+    }
+
+    return result;
 }
 
 TensorPtr Tensor::transpose() const {
