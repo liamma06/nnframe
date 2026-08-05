@@ -506,78 +506,147 @@ TensorPtr Tensor::operator-(const TensorPtr& other) const { return sub(other); }
 TensorPtr Tensor::operator*(const TensorPtr& other) const { return mul(other); }
 
 TensorPtr Tensor::matmul(const TensorPtr& other) const {
-    assert(rank() == 2 && other->rank() == 2 && "Both tensors must be 2D for matrix multiplication");
-    assert(shape_[1] == other->shape()[0] && "Inner dimensions must match for matrix multiplication");
+    assert(rank() == other->rank() && (rank() == 2 || rank() == 3) && "Both tensors must be rank 2 or rank 3, and match each other");
+    assert(shape_[rank() - 1] == other->shape()[rank() - 2] && "Inner dimensions must match for matrix multiplication");
 
-    size_t M = shape_[0];
-    size_t K = shape_[1];
-    size_t N = other->shape()[1];
+    if (rank() == 2){
+        size_t M = shape_[0];
+        size_t K = shape_[1];
+        size_t N = other->shape()[1];
 
-    auto output_tensor = Tensor::create({M, N});
-    if (requires_grad_ || other->requires_grad_)
-        output_tensor->requires_grad_ = true;
+        auto output_tensor = Tensor::create({M, N});
+        if (requires_grad_ || other->requires_grad_)
+            output_tensor->requires_grad_ = true;
 
-    /*
-        dot product for each element in the output tensor
+        /*
+            dot product for each element in the output tensor
 
-        For every sample(i) loop through the neurons(j) and compute the dot products with
-        the inputs(k) and the weights(k) of the other tensor.
+            For every sample(i) loop through the neurons(j) and compute the dot products with
+            the inputs(k) and the weights(k) of the other tensor.
 
-        therefore the inputs and weights have to match the same size
+            therefore the inputs and weights have to match the same size
 
-        for each sample and each neuron the full input dot weights is stored in output tensor
-    */
-    for (size_t i = 0; i < M; i++) {
-        for (size_t j = 0; j < N; j++) {
-            scalar_t sum = 0.0f;
-            for (size_t k = 0; k < K; k++) {
-                sum += at({i, k}) * other->at({k, j});
+            for each sample and each neuron the full input dot weights is stored in output tensor
+        */
+        for (size_t i = 0; i < M; i++) {
+            for (size_t j = 0; j < N; j++) {
+                scalar_t sum = 0.0f;
+                for (size_t k = 0; k < K; k++) {
+                    sum += at({i, k}) * other->at({k, j});
+                }
+                output_tensor->at({i, j}) = sum;
             }
-            output_tensor->at({i, j}) = sum;
         }
-    }
 
-    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
 
-    output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
-    output_tensor->grad_fn_ = [self, other](const Tensor& upstream) {
-        
-        if (self->requires_grad_) {
-            if (!self->grad_) {
-                self->grad_ = Tensor::create(self->shape_);
+        output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
+        output_tensor->grad_fn_ = [self, other](const Tensor& upstream) {
+            
+            if (self->requires_grad_) {
+                if (!self->grad_) {
+                    self->grad_ = Tensor::create(self->shape_);
+                }
+
+                // Gradient w.r.t self: upstream * other^T
+                for (size_t i = 0; i < self->shape_[0]; i++) {
+                    for (size_t k = 0; k < self->shape_[1]; k++) {
+                        scalar_t sum = 0.0f;
+                        for (size_t j = 0; j < other->shape()[1]; j++) {
+                            sum += upstream.at({i, j}) * other->at({k, j});
+                        }
+                        self->grad_->at({i, k}) += sum;
+                    }
+                }
             }
 
-            // Gradient w.r.t self: upstream * other^T
-            for (size_t i = 0; i < self->shape_[0]; i++) {
-                for (size_t k = 0; k < self->shape_[1]; k++) {
-                    scalar_t sum = 0.0f;
+            if (other->requires_grad_) {
+                if (!other->grad_) {
+                    other->grad_ = Tensor::create(other->shape_);
+                }
+
+                // Gradient w.r.t other: self^T * upstream
+                for (size_t k = 0; k < other->shape()[0]; k++) {
                     for (size_t j = 0; j < other->shape()[1]; j++) {
-                        sum += upstream.at({i, j}) * other->at({k, j});
+                        scalar_t sum = 0.0f;
+                        for (size_t i = 0; i < self->shape_[0]; i++) {
+                            sum += self->at({i, k}) * upstream.at({i, j});
+                        }
+                        other->grad_->at({k, j}) += sum;
                     }
-                    self->grad_->at({i, k}) += sum;
                 }
             }
-        }
+        };
 
-        if (other->requires_grad_) {
-            if (!other->grad_) {
-                other->grad_ = Tensor::create(other->shape_);
-            }
+        return output_tensor;
+    }else if (rank() == 3){
+        /*
+            for attention: [num_heads, seq_len, head_dim]
+        */
+        assert(shape_[0] == other->shape()[0] && "Leading (head) dimension must match for batched matmul");
 
-            // Gradient w.r.t other: self^T * upstream
-            for (size_t k = 0; k < other->shape()[0]; k++) {
-                for (size_t j = 0; j < other->shape()[1]; j++) {
+        size_t L = shape_[0];
+        size_t M = shape_[1];
+        size_t K = shape_[2];
+        size_t N = other->shape()[2];
+
+        auto output_tensor = Tensor::create({L, M, N});
+
+        if (requires_grad_ || other->requires_grad_)
+            output_tensor->requires_grad_ = true;
+
+        // same M/N/K dot-product as the 2D case, just looped once per leading (head) slice
+        for (size_t l = 0; l < L; l++) {
+            for (size_t m = 0; m < M; m++) {
+                for (size_t n = 0; n < N; n++) {
                     scalar_t sum = 0.0f;
-                    for (size_t i = 0; i < self->shape_[0]; i++) {
-                        sum += self->at({i, k}) * upstream.at({i, j});
+                    for (size_t k = 0; k < K; k++) {
+                        sum += at({l, m, k}) * other->at({l, k, n});
                     }
-                    other->grad_->at({k, j}) += sum;
+                    output_tensor->at({l, m, n}) = sum;
                 }
             }
         }
-    };
 
-    return output_tensor;
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
+        output_tensor->grad_fn_ = [self, other, L, M, K, N](const Tensor& upstream) {
+
+            if (self->requires_grad_) {
+                self->init_grad();
+                for (size_t l = 0; l < L; l++) {
+                    for (size_t m = 0; m < M; m++) {
+                        for (size_t k = 0; k < K; k++) {
+                            scalar_t sum = 0.0f;
+                            for (size_t n = 0; n < N; n++) {
+                                sum += upstream.at({l, m, n}) * other->at({l, k, n});
+                            }
+                            self->grad_->at({l, m, k}) += sum;
+                        }
+                    }
+                }
+            }
+
+            if (other->requires_grad_) {
+                other->init_grad();
+                for (size_t l = 0; l < L; l++) {
+                    for (size_t k = 0; k < K; k++) {
+                        for (size_t n = 0; n < N; n++) {
+                            scalar_t sum = 0.0f;
+                            for (size_t m = 0; m < M; m++) {
+                                sum += self->at({l, m, k}) * upstream.at({l, m, n});
+                            }
+                            other->grad_->at({l, k, n}) += sum;
+                        }
+                    }
+                }
+            }
+        };
+
+        return output_tensor;
+    }
+    assert(false && "unreachable");
+    return nullptr;
 }
 
 // AUTOGRAD
@@ -628,59 +697,117 @@ void Tensor::backward(){
 //ATTENTION 
 
 TensorPtr Tensor::softmax(size_t dim) const{
+    /*
+        eventhough we take in dim 
+        it assumes it always down the last dimension of the tensor (the neurons)
+        so it collects cross the rows(token) and normalizes the values in each row to sum to 1
+    */
+
     assert(dim < rank() && "Dimension out of bounds for softmax");
+    assert((rank() == 2 || rank() == 3) && "softmax only supports rank 2 or rank 3");
 
     TensorPtr output_tensor = Tensor::create(shape_);
 
-    
-    for (size_t i = 0; i < shape_[0]; i++){
+    if (rank() == 2){
 
-        // subtract row max (prevents exp overflow -> NaN)
-        scalar_t row_max = at({i, 0});
-        for (size_t j = 1; j < shape_[1]; j++)
-            row_max = std::max(row_max, at({i, j}));
+        for (size_t i = 0; i < shape_[0]; i++){
 
-        //exp
-        for (size_t j = 0; j < shape_[1]; j++){
-            output_tensor->at({i, j}) = std::exp(at({i, j}) - row_max);
+            // subtract row max (prevents exp overflow -> NaN)
+            scalar_t row_max = at({i, 0});
+            for (size_t j = 1; j < shape_[1]; j++)
+                row_max = std::max(row_max, at({i, j}));
+
+            //exp
+            for (size_t j = 0; j < shape_[1]; j++){
+                output_tensor->at({i, j}) = std::exp(at({i, j}) - row_max);
+            };
+
+            //sum
+            scalar_t row_sum = 0.0f;
+            for (size_t j = 0; j < shape_[1]; j++){
+                row_sum += output_tensor->at({i, j});
+            }
+
+            //normalize
+            for (size_t j = 0; j < shape_[1]; j++){
+                output_tensor->at({i, j}) /= row_sum;
+            }
         };
 
-        //sum
-        scalar_t row_sum = 0.0f;
-        for (size_t j = 0; j < shape_[1]; j++){
-            row_sum += output_tensor->at({i, j});
+        if (requires_grad_){
+            output_tensor->set_requires_grad(true);
         }
 
-        //normalize
-        for (size_t j = 0; j < shape_[1]; j++){
-            output_tensor->at({i, j}) /= row_sum;
-        }
-    };
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        output_tensor->set_inputs(std::vector<TensorPtr>{self});
+        output_tensor->set_grad_fn([self, output_tensor](const Tensor& upstream){
 
-    if (requires_grad_){
-        output_tensor->set_requires_grad(true);
+            if (self->requires_grad()){
+                self->init_grad();
+
+                for (size_t i = 0; i < self->shape_[0]; i++){
+                    scalar_t dot_product = 0.0f;
+                    for (size_t j = 0; j < self->shape_[1]; j++){
+                        dot_product += upstream.at({i, j}) * output_tensor->at({i, j});
+                    }
+
+                    for (size_t j = 0; j < self->shape_[1]; j++){
+                        self->grad().mutable_data()[i * self->shape_[1] + j] += output_tensor->at({i, j}) * (upstream.at({i, j}) - dot_product);
+                    }
+                }
+            }
+        });
     }
+    else if (rank() == 3){
+        for (size_t i = 0; i < shape_[0]; i++){ //aditional rank 3 loop 
+            for (size_t j = 0; j < shape_[1]; j++){
 
-    auto self = std::const_pointer_cast<Tensor>(shared_from_this());
-    output_tensor->set_inputs(std::vector<TensorPtr>{self});
-    output_tensor->set_grad_fn([self, output_tensor](const Tensor& upstream){
+                scalar_t row_max = at({i, j, 0});
+                for (size_t k = 1; k < shape_[2]; k++)
+                    row_max = std::max(row_max, at({i, j, k}));
 
-        if (self->requires_grad()){
-            self->init_grad();
+                for (size_t k = 0; k < shape_[2]; k++){
+                    output_tensor->at({i, j, k}) = std::exp(at({i, j, k}) - row_max);
+                };
 
-            for (size_t i = 0; i < self->shape_[0]; i++){
-                scalar_t dot_product = 0.0f;
-                for (size_t j = 0; j < self->shape_[1]; j++){
-                    dot_product += upstream.at({i, j}) * output_tensor->at({i, j});
+                scalar_t row_sum = 0.0f;
+                for (size_t k = 0; k < shape_[2]; k++){
+                    row_sum += output_tensor->at({i, j, k});
                 }
 
-                for (size_t j = 0; j < self->shape_[1]; j++){
-                    self->grad().mutable_data()[i * self->shape_[1] + j] += output_tensor->at({i, j}) * (upstream.at({i, j}) - dot_product);
+                for (size_t k = 0; k < shape_[2]; k++){
+                    output_tensor->at({i, j, k}) /= row_sum;
                 }
             }
         }
-    });
 
+        if (requires_grad_){
+            output_tensor->set_requires_grad(true);
+        }
+
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        output_tensor->set_inputs(std::vector<TensorPtr>{self});
+        output_tensor->set_grad_fn([self, output_tensor](const Tensor& upstream){
+
+            if (self->requires_grad()){
+                self->init_grad();
+
+                for (size_t i = 0; i < self->shape_[0]; i++){
+                    for (size_t j = 0; j < self->shape_[1]; j++){
+                        scalar_t dot_product = 0.0f;
+                        for (size_t k = 0; k < self->shape_[2]; k++){
+                            dot_product += upstream.at({i, j, k}) * output_tensor->at({i, j, k});
+                        }
+
+                        for (size_t k = 0; k < self->shape_[2]; k++){
+                            self->grad().mutable_data()[i * self->shape_[1] * self->shape_[2] + j * self->shape_[2] + k] += output_tensor->at({i, j, k}) * (upstream.at({i, j, k}) - dot_product);
+                        }
+                    }
+                }
+            }
+        });
+        
+    }
     return output_tensor;
 }
 

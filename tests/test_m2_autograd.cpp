@@ -2,6 +2,86 @@
 #include "doctest.h"
 #include "core/tensor.h"
 
+TEST_CASE("softmax rank-3 backward - gradient computed independently per (head, query) row") {
+    // t's rows all have equal pairs, so softmax(t) is exactly [0.5, 0.5] everywhere -
+    // that pins down the softmax output precisely, so any error shows up purely from
+    // the backward indexing (h,q,k), not from imprecise exp() arithmetic.
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 2}, std::vector<scalar_t>{
+        1, 1,  2, 2,      // head0
+        3, 3,  4, 4       // head1
+    });
+    t->set_requires_grad(true);
+
+    auto s = t->softmax(2);
+    // deliberately distinct per-row magnitudes (10s, 30s, 200s, single-digit) so an
+    // (h,q) index mixup in the backward loop would produce a clearly wrong value
+    auto scale = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 2}, std::vector<scalar_t>{
+        10, 20,   30, 60,
+        100, 300,  7, 9
+    });
+    auto c = s->mul(scale);
+    c->backward();
+
+    // s=[0.5,0.5] everywhere => dt[h,q,k] = 0.5 * (scale[h,q,k] - avg(scale[h,q,:]))
+    CHECK(t->grad().at({0, 0, 0}) == doctest::Approx(-2.5f));
+    CHECK(t->grad().at({0, 0, 1}) == doctest::Approx(2.5f));
+    CHECK(t->grad().at({0, 1, 0}) == doctest::Approx(-7.5f));
+    CHECK(t->grad().at({0, 1, 1}) == doctest::Approx(7.5f));
+    CHECK(t->grad().at({1, 0, 0}) == doctest::Approx(-50.0f));
+    CHECK(t->grad().at({1, 0, 1}) == doctest::Approx(50.0f));
+    CHECK(t->grad().at({1, 1, 0}) == doctest::Approx(-0.5f));
+    CHECK(t->grad().at({1, 1, 1}) == doctest::Approx(0.5f));
+}
+
+TEST_CASE("matmul rank-3 backward - gradients computed independently per head slice") {
+    // same L=2,M=2,K=3,N=2 (non-square) shapes as the rank-3 forward test
+    auto a = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 3}, std::vector<scalar_t>{
+        1, 2, 3,  4, 5, 6,
+        7, 8, 9,  10, 11, 12
+    });
+    auto b = std::make_shared<Tensor>(std::vector<size_t>{2, 3, 2}, std::vector<scalar_t>{
+        1, 0,  0, 1,  1, 1,
+        2, 0,  0, 2,  1, 1
+    });
+    a->set_requires_grad(true);
+    b->set_requires_grad(true);
+
+    auto c = a->matmul(b);
+    c->backward(); // upstream is all-ones, shape [2,2,2]
+
+    // da[l,m,k] = sum_n upstream[l,m,n] * b[l,k,n] = sum_n b[l,k,n] (upstream all ones)
+    // l=0: b rows are [1,0]->1, [0,1]->1, [1,1]->2 - same for both m rows
+    CHECK(a->grad().at({0, 0, 0}) == 1.0f);
+    CHECK(a->grad().at({0, 0, 1}) == 1.0f);
+    CHECK(a->grad().at({0, 0, 2}) == 2.0f);
+    CHECK(a->grad().at({0, 1, 0}) == 1.0f);
+    CHECK(a->grad().at({0, 1, 1}) == 1.0f);
+    CHECK(a->grad().at({0, 1, 2}) == 2.0f);
+    // l=1: b rows are [2,0]->2, [0,2]->2, [1,1]->2
+    CHECK(a->grad().at({1, 0, 0}) == 2.0f);
+    CHECK(a->grad().at({1, 0, 1}) == 2.0f);
+    CHECK(a->grad().at({1, 0, 2}) == 2.0f);
+    CHECK(a->grad().at({1, 1, 0}) == 2.0f);
+    CHECK(a->grad().at({1, 1, 1}) == 2.0f);
+    CHECK(a->grad().at({1, 1, 2}) == 2.0f);
+
+    // db[l,k,n] = sum_m a[l,m,k] * upstream[l,m,n] = sum_m a[l,m,k] (upstream all ones)
+    // l=0: a columns are k=0:[1,4]->5, k=1:[2,5]->7, k=2:[3,6]->9 - same for both n cols
+    CHECK(b->grad().at({0, 0, 0}) == 5.0f);
+    CHECK(b->grad().at({0, 0, 1}) == 5.0f);
+    CHECK(b->grad().at({0, 1, 0}) == 7.0f);
+    CHECK(b->grad().at({0, 1, 1}) == 7.0f);
+    CHECK(b->grad().at({0, 2, 0}) == 9.0f);
+    CHECK(b->grad().at({0, 2, 1}) == 9.0f);
+    // l=1: a columns are k=0:[7,10]->17, k=1:[8,11]->19, k=2:[9,12]->21
+    CHECK(b->grad().at({1, 0, 0}) == 17.0f);
+    CHECK(b->grad().at({1, 0, 1}) == 17.0f);
+    CHECK(b->grad().at({1, 1, 0}) == 19.0f);
+    CHECK(b->grad().at({1, 1, 1}) == 19.0f);
+    CHECK(b->grad().at({1, 2, 0}) == 21.0f);
+    CHECK(b->grad().at({1, 2, 1}) == 21.0f);
+}
+
 TEST_CASE("add backward - grad flows equally to both inputs") {
     auto a = std::make_shared<Tensor>(std::vector<size_t>{2}, std::vector<scalar_t>{1.0f, 2.0f});
     auto b = std::make_shared<Tensor>(std::vector<size_t>{2}, std::vector<scalar_t>{3.0f, 4.0f});

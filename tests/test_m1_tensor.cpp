@@ -152,6 +152,66 @@ TEST_CASE("matmul 2x3 * 3x2") {
     CHECK(c->at({1, 1}) == 154.0f);
 }
 
+TEST_CASE("matmul rank-3 loops leading (head) dimension independently") {
+    // L=2, M=2, K=3, N=2 - deliberately non-square so a dimension mixup would be caught
+    auto a = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 3}, std::vector<scalar_t>{
+        1, 2, 3,  4, 5, 6,      // l=0
+        7, 8, 9,  10, 11, 12    // l=1
+    });
+    auto b = std::make_shared<Tensor>(std::vector<size_t>{2, 3, 2}, std::vector<scalar_t>{
+        1, 0,  0, 1,  1, 1,     // l=0
+        2, 0,  0, 2,  1, 1      // l=1
+    });
+    auto c = a->matmul(b);
+
+    CHECK(c->shape()[0] == 2);
+    CHECK(c->shape()[1] == 2);
+    CHECK(c->shape()[2] == 2);
+
+    // l=0 slice: [[1,2,3],[4,5,6]] @ [[1,0],[0,1],[1,1]]
+    CHECK(c->at({0, 0, 0}) == 4.0f);
+    CHECK(c->at({0, 0, 1}) == 5.0f);
+    CHECK(c->at({0, 1, 0}) == 10.0f);
+    CHECK(c->at({0, 1, 1}) == 11.0f);
+
+    // l=1 slice: [[7,8,9],[10,11,12]] @ [[2,0],[0,2],[1,1]]
+    CHECK(c->at({1, 0, 0}) == 23.0f);
+    CHECK(c->at({1, 0, 1}) == 25.0f);
+    CHECK(c->at({1, 1, 0}) == 32.0f);
+    CHECK(c->at({1, 1, 1}) == 34.0f);
+}
+
+TEST_CASE("softmax rank-3 normalizes each (head, query) row independently") {
+    // shape [num_heads=2, seq=2, seq=2]
+    auto t = std::make_shared<Tensor>(std::vector<size_t>{2, 2, 2}, std::vector<scalar_t>{
+        1, 3,  2, 2,    // head0: row0=[1,3], row1=[2,2]
+        0, 0,  5, 1     // head1: row0=[0,0], row1=[5,1]
+    });
+    auto s = t->softmax(2);
+
+    CHECK(s->shape()[0] == 2);
+    CHECK(s->shape()[1] == 2);
+    CHECK(s->shape()[2] == 2);
+
+    // head0, row0: [1,3] -> subtract max 3 -> exp[-2,0] -> normalize
+    CHECK(s->at({0, 0, 0}) == doctest::Approx(0.11920292f).epsilon(0.0001));
+    CHECK(s->at({0, 0, 1}) == doctest::Approx(0.88079708f).epsilon(0.0001));
+    // head0, row1: [2,2] -> equal -> [0.5,0.5]
+    CHECK(s->at({0, 1, 0}) == doctest::Approx(0.5f));
+    CHECK(s->at({0, 1, 1}) == doctest::Approx(0.5f));
+    // head1, row0: [0,0] -> equal -> [0.5,0.5]
+    CHECK(s->at({1, 0, 0}) == doctest::Approx(0.5f));
+    CHECK(s->at({1, 0, 1}) == doctest::Approx(0.5f));
+    // head1, row1: [5,1] -> subtract max 5 -> exp[0,-4] -> normalize
+    CHECK(s->at({1, 1, 0}) == doctest::Approx(0.98201379f).epsilon(0.0001));
+    CHECK(s->at({1, 1, 1}) == doctest::Approx(0.01798621f).epsilon(0.0001));
+
+    // every row sums to 1, regardless of head or query
+    for (size_t h = 0; h < 2; h++)
+        for (size_t q = 0; q < 2; q++)
+            CHECK(s->at({h, q, 0}) + s->at({h, q, 1}) == doctest::Approx(1.0f));
+}
+
 TEST_CASE("matmul on transposed tensor") {
     auto a = std::make_shared<Tensor>(std::vector<size_t>{2, 3}, std::vector<scalar_t>{1, 2, 3, 4, 5, 6});
     auto b = std::make_shared<Tensor>(std::vector<size_t>{2, 3}, std::vector<scalar_t>{7, 8, 9, 10, 11, 12});
