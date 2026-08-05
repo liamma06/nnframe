@@ -705,6 +705,7 @@ TensorPtr Tensor::softmax(size_t dim) const{
 
     assert(dim < rank() && "Dimension out of bounds for softmax");
     assert((rank() == 2 || rank() == 3) && "softmax only supports rank 2 or rank 3");
+    assert(dim == rank() - 1 && "softmax currently only supports normalizing the last axis");
 
     TensorPtr output_tensor = Tensor::create(shape_);
 
