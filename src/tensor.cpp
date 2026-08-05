@@ -239,6 +239,40 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
     return result;
 }
 
+TensorPtr Tensor::contiguous() const {
+    // copies data into a new contiguous tensor
+    // permute ( i, j ) while reshape -> straight through, so just copy (index based) back
+    auto result = Tensor::create(shape_);
+
+    if (numel() > 0) {
+        std::vector<size_t> idx(rank(), 0);
+        while (true) {
+            result->at(idx) = at(idx);
+            if (!increment_index(idx, shape_)) break;
+        }
+    }
+
+    if (requires_grad_) {
+        result->set_requires_grad(true);
+        auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+        result->set_inputs({self});
+        result->set_grad_fn([self](const Tensor& upstream) {
+            if (self->requires_grad()) {
+                self->init_grad();
+                if (self->numel() > 0) {
+                    std::vector<size_t> idx(self->rank(), 0);
+                    while (true) {
+                        self->grad().at(idx) += upstream.at(idx);
+                        if (!increment_index(idx, self->shape())) break;
+                    }
+                }
+            }
+        });
+    }
+
+    return result;
+}
+
 TensorPtr Tensor::transpose() const {
     assert(rank() == 2 && "transpose is for 2D tensors, use permute for higher ranks");
     auto result = permute({1, 0});

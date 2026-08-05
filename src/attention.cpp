@@ -38,40 +38,84 @@ std::vector<TensorPtr> SelfAttention::parameters() const{
 
 TensorPtr SelfAttention::forward(const TensorPtr& input){
     /*
-        input: [seq_length, embed_dim]
-        output: [seq_length, embed_dim]
+        rank 2 (start)
+            input: [seq_length, embed_dim]
+            output: [seq_length, embed_dim]
+
+        rank 3 (middle -> split into heads)
+            Q: [seq_length, embed_dim]
+            -> reshape  -> [seq_length, num_heads, head_dim]   (head_dim = embed_dim / num_heads)
+            -> permute  -> [num_heads, seq_length, head_dim]
+
+
+        rank 2 (end)
+            input: [seq_length, embed_dim]
+            output: [seq_length, embed_dim]
     */
+
 
     TensorPtr Q = input->matmul(W_q_);
     TensorPtr K = input->matmul(W_k_);
     TensorPtr V = input->matmul(W_v_);
 
-    TensorPtr scores = (Q->matmul(K->transpose()))->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
-    
-    //mask and it the only option we need the grad_fn everything else is handled 
+    //rank 3 split into heads
+    /*
+        This confused me so ...
+        We need to reshape first to break the data up into groups however to do the actual calcualtion 
+        We want ALL of the head data to be togther 
+        SO -> data split but merged togther 
+
+        With permute we move the head dimension to the front so we can matmul all within the same head togther 
+        and not mix between the heads 
+    */
+    TensorPtr Q_reshaped = Q->reshape({input->shape()[0],num_heads_,  head_dim_});
+    TensorPtr K_reshaped = K->reshape({input->shape()[0],num_heads_,  head_dim_});
+    TensorPtr V_reshaped = V->reshape({input->shape()[0],num_heads_, head_dim_});
+
+    TensorPtr Q_head = Q_reshaped->permute({1, 0, 2});
+    TensorPtr K_head = K_reshaped->permute({1, 0, 2});
+    TensorPtr V_head = V_reshaped->permute({1, 0,2}); 
+
+    TensorPtr K_transposed = K_head->permute({0, 2, 1}); //transpose last 2 dims for matmul
+    TensorPtr scores = Q_head->matmul(K_transposed)->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
+
+
+    //mask looping through each head and each token and setting to -inf if after
     auto masked_scores = Tensor::create(scores->shape());
     for (size_t i = 0; i < scores->shape()[0]; i++){
         for (size_t j = 0; j < scores->shape()[1]; j++){
-            masked_scores->at({i,j}) = (j > i) ? -1e9f : scores->at({i,j});
+            for (size_t k = 0; k < scores->shape()[2]; k++){
+                if (k <= j)
+                    masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
+                else
+                    masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+            }
         }
     }
+
     masked_scores->set_inputs({scores});
     masked_scores->set_requires_grad(scores->requires_grad());
     masked_scores->set_grad_fn([scores](const Tensor& upstream){
         if (scores->requires_grad()){
             scores->init_grad();
-            for (size_t i = 0; i < scores->shape()[0]; i++){
-                for (size_t j = 0; j < scores->shape()[1]; j++){
-                    if (j <= i)
-                        scores->grad().mutable_data()[i * scores->shape()[1] + j] += upstream.at({i,j});
+                for (size_t i = 0; i < scores->shape()[0]; i++){
+                    for (size_t j = 0; j < scores->shape()[1]; j++){
+                        for (size_t k = 0; k < scores->shape()[2]; k++){
+                            if (k <= j)
+                                scores->grad().mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] += upstream.at({i,j,k});
+                        }
+                    }
                 }
-            }
         }
     });
 
-    TensorPtr attention_weights = masked_scores->softmax(1);
-    TensorPtr attention_output = attention_weights->matmul(V);
-    TensorPtr output = attention_output->matmul(W_o_);
+    TensorPtr attention_weights = masked_scores->softmax(2);
+    TensorPtr attention_output = attention_weights->matmul(V_head);
+
+    //turn the 3 rank back to 2 rank (all togther in W_o_)
+    TensorPtr attention_output_reshaped = attention_output->permute({1, 0, 2})->contiguous()->reshape({input->shape()[0], embed_dim_});
+
+    TensorPtr output = attention_output_reshaped->matmul(W_o_);
 
     return output;
 }

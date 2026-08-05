@@ -48,6 +48,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         TensorPtr reshape(std::vector<size_t> new_shape) const;
         TensorPtr transpose() const;
         TensorPtr permute(std::vector<size_t> axes) const;
+        TensorPtr contiguous() const; //need a way for buffer cause premute and reshape can create non-contiguous data
 
         // Math ops(completely new tensor is returned )
         TensorPtr add(const TensorPtr& other) const;

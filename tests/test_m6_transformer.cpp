@@ -138,6 +138,42 @@ TEST_CASE("attention has 4 parameter matrices") {
     CHECK(attn.parameters().size() == 4);
 }
 
+TEST_CASE("multi-head attention (num_heads > 1) output shape matches input") {
+    SelfAttention attn(8, 2); // embed_dim=8, num_heads=2 -> head_dim=4
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, 0.1f);
+    auto out = attn.forward(x);
+    CHECK(out->shape()[0] == 4);
+    CHECK(out->shape()[1] == 8);
+}
+
+TEST_CASE("multi-head attention (num_heads > 1) - gradients reach all weight matrices") {
+    // regression test for the reshape/permute/mask/contiguous chain in the
+    // multi-head rewrite - num_heads=1 tests can't catch a broken head split,
+    // since a single head makes that whole path trivial (L=1)
+    SelfAttention attn(8, 2);
+    auto x = std::make_shared<Tensor>(std::vector<size_t>{4, 8}, std::vector<scalar_t>{
+        0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f,
+        0.2f, 0.1f, 0.5f, 0.3f, 0.6f, 0.4f, 0.8f, 0.7f,
+        0.9f, 0.1f, 0.2f, 0.8f, 0.3f, 0.7f, 0.4f, 0.6f,
+        0.4f, 0.5f, 0.6f, 0.1f, 0.9f, 0.2f, 0.8f, 0.3f
+    });
+
+    auto out = attn.forward(x);
+    auto loss = out->mean();
+    loss->backward();
+
+    for (const auto& param : attn.parameters()) {
+        REQUIRE(param->requires_grad());
+        bool has_nonzero = false;
+        for (size_t i = 0; i < param->numel(); i++) {
+            scalar_t g = param->grad().data()[i];
+            CHECK(std::isfinite(g)); // catches NaN/inf from a broken mask or softmax
+            if (g != 0.0f) has_nonzero = true;
+        }
+        CHECK(has_nonzero); // catches a silently-broken autograd chain (e.g. missing grad_fn)
+    }
+}
+
 // ── PositionalEncoding ───────────────────────────────────────────────────────
 
 TEST_CASE("positional encoding output shape matches input") {
