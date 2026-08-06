@@ -7,6 +7,7 @@
 #include "modules/layernorm.h"
 #include "modules/linear.h"
 #include "modules/gelu.h"
+#include "infer/kv_cache.h"
 
 class TransformerBlock : public Layer {
     private:
@@ -20,4 +21,6 @@ class TransformerBlock : public Layer {
         TransformerBlock(size_t embed_dim, size_t num_heads);
         std::vector<TensorPtr> parameters() const override;
         TensorPtr forward(const TensorPtr& input) override;
+
+        TensorPtr forward(const TensorPtr& input, KVCache& kv_cache);
 };

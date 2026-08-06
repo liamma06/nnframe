@@ -54,3 +54,20 @@ TensorPtr TransformerBlock::forward(const TensorPtr& input){
     TensorPtr output = linear_output2->add(residual1);
     return output;
 }
+
+TensorPtr TransformerBlock::forward(const TensorPtr& input, KVCache& kv_cache){
+    /*
+        Same as above but pass in KVCache to attention
+    */
+    TensorPtr pre_norm_input = layer_norm1_.forward(input);
+    TensorPtr attn_output = self_attention_.forward(pre_norm_input, kv_cache);
+    TensorPtr residual1 = attn_output->add(input);
+    TensorPtr pre_norm2 = layer_norm2_.forward(residual1);
+    
+    TensorPtr linear_output1 = linear1_.forward(pre_norm2);
+    TensorPtr gelu_output = GELU().forward(linear_output1);
+    TensorPtr linear_output2 = linear2_.forward(gelu_output);
+
+    TensorPtr output = linear_output2->add(residual1);
+    return output;
+}
