@@ -2,6 +2,18 @@
 #include "doctest.h"
 #include "core/tensor.h"
 #include "infer/kv_cache.h"
+#include "modules/attention.h"
+
+namespace {
+    // pulls out rows [start, start+count) as a fresh [count, embed_dim] tensor
+    TensorPtr extract_rows(const TensorPtr& t, size_t start, size_t count, size_t embed_dim) {
+        std::vector<scalar_t> vals;
+        for (size_t i = 0; i < count; i++)
+            for (size_t j = 0; j < embed_dim; j++)
+                vals.push_back(t->at({start + i, j}));
+        return std::make_shared<Tensor>(std::vector<size_t>{count, embed_dim}, vals);
+    }
+}
 
 TEST_CASE("KVCache: first append stores directly, no growth") {
     KVCache cache;
@@ -86,4 +98,41 @@ TEST_CASE("KVCache: prefill (multi-token) then decode (single-token) grows corre
     CHECK(v2->at({1, 2, 1}) == 6000.0f);  // old v preserved
     CHECK(v2->at({0, 3, 0}) == 700.0f);   // new v appended
     CHECK(v2->at({1, 3, 1}) == 8000.0f);  // new v appended
+}
+
+TEST_CASE("SelfAttention: cached prefill+decode matches plain full-sequence forward") {
+    const size_t embed_dim = 8, num_heads = 2, seq_len = 5;
+    SelfAttention attn(embed_dim, num_heads);
+
+    // deterministic, varied input: row i, col j = i*0.1 + j*0.01
+    std::vector<scalar_t> x_data;
+    for (size_t i = 0; i < seq_len; i++)
+        for (size_t j = 0; j < embed_dim; j++)
+            x_data.push_back(static_cast<scalar_t>(i) * 0.1f + static_cast<scalar_t>(j) * 0.01f);
+    auto x_full = std::make_shared<Tensor>(std::vector<size_t>{seq_len, embed_dim}, x_data);
+
+    // ground truth: one shot, no cache, no masking special-casing
+    auto ground_truth = attn.forward(x_full);
+
+    // cached: prefill first 3 tokens, then decode tokens 3 and 4 one at a time
+    KVCache cache;
+    auto x_prefill = extract_rows(x_full, 0, 3, embed_dim);
+    auto prefill_out = attn.forward(x_prefill, cache);
+
+    CHECK(prefill_out->shape()[0] == 3);
+    for (size_t i = 0; i < 3; i++)
+        for (size_t j = 0; j < embed_dim; j++)
+            CHECK(prefill_out->at({i, j}) == doctest::Approx(ground_truth->at({i, j})).epsilon(1e-4));
+
+    auto x_tok3 = extract_rows(x_full, 3, 1, embed_dim);
+    auto decode_out3 = attn.forward(x_tok3, cache);
+    CHECK(decode_out3->shape()[0] == 1);
+    for (size_t j = 0; j < embed_dim; j++)
+        CHECK(decode_out3->at({0, j}) == doctest::Approx(ground_truth->at({3, j})).epsilon(1e-4));
+
+    auto x_tok4 = extract_rows(x_full, 4, 1, embed_dim);
+    auto decode_out4 = attn.forward(x_tok4, cache);
+    CHECK(decode_out4->shape()[0] == 1);
+    for (size_t j = 0; j < embed_dim; j++)
+        CHECK(decode_out4->at({0, j}) == doctest::Approx(ground_truth->at({4, j})).epsilon(1e-4));
 }

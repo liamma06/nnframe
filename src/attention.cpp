@@ -1,5 +1,6 @@
 #include "modules/attention.h"
 #include <random>
+#include <limits>
 
 
 
@@ -115,6 +116,72 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     //turn the 3 rank back to 2 rank (all togther in W_o_)
     TensorPtr attention_output_reshaped = attention_output->permute({1, 0, 2})->contiguous()->reshape({input->shape()[0], embed_dim_});
 
+    TensorPtr output = attention_output_reshaped->matmul(W_o_);
+
+    return output;
+}
+
+TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
+    /*
+        Same forward but KV Cache used 
+        1. compute new K and V from input
+        2. append to KVCache
+        3. use full K and V from KVcache for calculation
+        4. Q is compared to all K and V from cache
+
+        use is also different:
+            - other forward for trianing
+            - this for prefill and decode (inference)
+    */
+
+    TensorPtr Q = input->matmul(W_q_);
+    TensorPtr K = input->matmul(W_k_);
+    TensorPtr V = input->matmul(W_v_);
+
+    //split into heads then input into the KVCACHE 
+    TensorPtr K_split = K->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
+    TensorPtr V_split = V->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
+
+    kv_cache.append(K_split, V_split);
+
+    TensorPtr full_K = kv_cache.get_k();
+    TensorPtr full_V = kv_cache.get_v();
+
+
+    TensorPtr Q_split = Q->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
+
+    //scores against all K in cache ! 
+    TensorPtr K_transposed = full_K->permute({0, 2, 1});
+    TensorPtr scores = Q_split->matmul(K_transposed)->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
+
+    /*
+        maksing is a lil different cause in prefil:
+            - we compare multiple new tokens so could have leak
+            - but in decode it the newest token so no future ones 
+    */
+
+    auto masked_scores = Tensor::create(scores->shape());
+
+    if (input->shape()[0] > 1){ // more than one token [seq_len, embded_dim]
+        for (size_t i = 0; i < scores->shape()[0]; i++){
+            for (size_t j = 0; j < scores->shape()[1]; j++){
+                for (size_t k = 0; k < scores->shape()[2]; k++){
+                    if (k <= j)
+                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
+                    else
+                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+                }
+            }
+        }
+    }
+    else{
+        masked_scores = scores;
+    }
+
+    //softmax -> matmul(V) -> Wo -> output (standard/same) 
+    TensorPtr attention_weights = masked_scores->softmax(2);
+    TensorPtr attention_output = attention_weights->matmul(full_V);
+    TensorPtr attention_output_reshaped = attention_output->permute({1, 0, 2})->contiguous()->reshape({input->shape()[0], embed_dim_});
     TensorPtr output = attention_output_reshaped->matmul(W_o_);
 
     return output;
