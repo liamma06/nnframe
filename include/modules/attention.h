@@ -6,6 +6,8 @@
 #include "modules/layer.h"
 #include <cassert>
 
+#include "infer/kv_cache.h"
+
 class SelfAttention: public Layer{
     private:
         size_t embed_dim_;
@@ -26,4 +28,6 @@ class SelfAttention: public Layer{
         SelfAttention(size_t embed_dim, size_t num_heads = 1);
         std::vector<TensorPtr> parameters() const override;
         TensorPtr forward(const TensorPtr& input) override;
+
+        TensorPtr forward(const TensorPtr& input, KVCache& kv_cache); 
 } ;
