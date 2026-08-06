@@ -3,6 +3,7 @@
 #include "core/tensor.h"
 #include "infer/kv_cache.h"
 #include "modules/attention.h"
+#include "infer/sampler.h"
 
 namespace {
     // pulls out rows [start, start+count) as a fresh [count, embed_dim] tensor
@@ -135,4 +136,33 @@ TEST_CASE("SelfAttention: cached prefill+decode matches plain full-sequence forw
     CHECK(decode_out4->shape()[0] == 1);
     for (size_t j = 0; j < embed_dim; j++)
         CHECK(decode_out4->at({0, j}) == doctest::Approx(ground_truth->at({4, j})).epsilon(1e-4));
+}
+
+TEST_CASE("Sampler: top_k=1 always picks the argmax token, deterministically") {
+    // index 3 has by far the highest logit
+    auto logits = std::make_shared<Tensor>(std::vector<size_t>{5}, std::vector<scalar_t>{1, 2, 3, 10, 2});
+    Sampler sampler(42);
+
+    for (int trial = 0; trial < 20; trial++) {
+        size_t chosen = sampler.sample(logits, 1.0f, 1);
+        CHECK(chosen == 3);
+    }
+}
+
+TEST_CASE("Sampler: never picks a token outside the top_k set") {
+    // sorted descending: idx3(10), idx2(3), idx1(2), idx4(2), idx0(1)
+    // top_k=2 should only ever return idx3 or idx2
+    auto logits = std::make_shared<Tensor>(std::vector<size_t>{5}, std::vector<scalar_t>{1, 2, 3, 10, 2});
+    Sampler sampler(42);
+
+    bool saw_idx3 = false, saw_idx2 = false;
+    for (int trial = 0; trial < 100; trial++) {
+        size_t chosen = sampler.sample(logits, 2.0f, 2); // higher temperature so idx2 gets picked sometimes too
+        CHECK((chosen == 2 || chosen == 3));
+        if (chosen == 3) saw_idx3 = true;
+        if (chosen == 2) saw_idx2 = true;
+    }
+    // over 100 trials with 2 valid candidates, both should show up at least once
+    CHECK(saw_idx3);
+    CHECK(saw_idx2);
 }
