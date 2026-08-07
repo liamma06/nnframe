@@ -85,4 +85,5 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         // factory methods
         static TensorPtr create(std::vector<size_t> shape, scalar_t fill = 0.0f);
         static TensorPtr zeros(std::vector<size_t> shape);
+        static TensorPtr from_vector(std::vector<scalar_t> data); // rank-1 tensor, shape inferred as {data.size()}
 };

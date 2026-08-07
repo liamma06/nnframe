@@ -51,6 +51,10 @@ TensorPtr Tensor::zeros(std::vector<size_t> shape) {
     return Tensor::create(shape);
 }
 
+TensorPtr Tensor::from_vector(std::vector<scalar_t> data) {
+    return std::make_shared<Tensor>(std::vector<size_t>{data.size()}, data);
+}
+
 
 //hlper stride func 
 size_t Tensor::compute_strides() {

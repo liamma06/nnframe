@@ -44,7 +44,7 @@ int main(){
 
     //main part 
     auto input_tensor = std::make_shared<Tensor>(std::vector<size_t>{num_points, 2}, input_data);
-    auto target_tensor = std::make_shared<Tensor>(std::vector<size_t>{num_points}, target_data);
+    auto target_tensor = Tensor::from_vector(target_data);
 
     auto model = std::make_shared<Sequential>(std::vector<std::shared_ptr<Layer>>{
         std::make_shared<Linear>(2, 16),

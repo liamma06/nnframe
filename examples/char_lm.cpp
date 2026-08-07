@@ -33,8 +33,8 @@ int main(){
         target_data.push_back(static_cast<scalar_t>(tokenized[i + 1]));
     }
 
-    auto input_tensor = std::make_shared<Tensor>(std::vector<size_t>{seq_len}, input_data);
-    auto target_tensor = std::make_shared<Tensor>(std::vector<size_t>{seq_len}, target_data);
+    auto input_tensor = Tensor::from_vector(input_data);
+    auto target_tensor = Tensor::from_vector(target_data);
 
     //model
     auto embedding_dim = 16;
