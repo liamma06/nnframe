@@ -20,11 +20,14 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         std::function<void(const Tensor&)> grad_fn_; //store function to compute gradient
         std::vector<std::shared_ptr<Tensor>> inputs_; //store parents for backpropagation
 
-
-
         size_t compute_strides();
 
         Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset); // takes in data ptr so no need to recopy/buffer
+
+        //SIMD malmul call (cant pass tensor only scalar pointer)
+        static void matmul_avx2(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
+        //plain scalar matmul
+        static void matmul_scalar(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
 
     public: 
         Tensor(std::vector<size_t> shape, scalar_t fill_value = 0.0f); 

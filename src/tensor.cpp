@@ -4,6 +4,8 @@
 #include <cmath>
 #include <unordered_set>
 
+#include <immintrin.h> //AVX2
+
 namespace {
     //func to see if we can increment index (odometer style)
     bool increment_index(std::vector<size_t>& idx, const std::vector<size_t>& shape){
@@ -543,11 +545,73 @@ TensorPtr Tensor::operator+(const TensorPtr& other) const { return add(other); }
 TensorPtr Tensor::operator-(const TensorPtr& other) const { return sub(other); }
 TensorPtr Tensor::operator*(const TensorPtr& other) const { return mul(other); }
 
+void Tensor::matmul_avx2(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N) {
+    /*
+        AVX2 -> 256 bit register 
+        8 floats per register (32 bit ea)
+
+        That means only 8 at a time so need to split N into chunks of 8 
+        and process each 
+
+        1. load 8 floats from a & b 
+        2. broadcast 1 float from a (to all 8 )
+        3. multiply and accumulate into out
+        4. repeat until K is done
+
+        NOTE: 1D array for a and b need to be careful with indexing
+    */
+
+    __m256 b_vec, prod_vec, a_broadcast, sum_vec;
+
+
+    for (size_t i = 0; i < M; i++){
+        for (size_t j = 0; j + 8 <= N; j+=8){ //0,8,16 , 24
+            sum_vec  = _mm256_setzero_ps(); 
+            for (size_t k = 0; k < K; k++){
+                a_broadcast = _mm256_set1_ps(a[i * K + k]); //a[i,k]
+                b_vec = _mm256_loadu_ps(&b[k * N + j]); //b[k,j:j+8]
+                prod_vec = _mm256_mul_ps(a_broadcast, b_vec); 
+                sum_vec = _mm256_add_ps(sum_vec, prod_vec); 
+            }
+            //store out[i,j:j+8]
+            _mm256_storeu_ps(&out[i * N + j], sum_vec);
+        }
+
+        //remainder 
+        for (size_t j = N - (N % 8); j < N; j++){
+            scalar_t sum = 0.0f;
+            for (size_t k = 0; k < K; k++){
+                sum += a[i * K + k] * b[k * N + j];
+            }
+            out[i * N + j] = sum;
+        }
+    }
+}
+
+void Tensor::matmul_scalar(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N) {
+    //basic matmul 
+    for (size_t i = 0; i < M; i++) {
+        for (size_t j = 0; j < N; j++) {
+            scalar_t sum = 0.0f;
+            for (size_t k = 0; k < K; k++) {
+                sum += a[i * K + k] * b[k * N + j];
+            }
+            out[i * N + j] = sum;
+        }
+    }
+}
+
 TensorPtr Tensor::matmul(const TensorPtr& other) const {
     assert(rank() == other->rank() && (rank() == 2 || rank() == 3) && "Both tensors must be rank 2 or rank 3, and match each other");
     assert(shape_[rank() - 1] == other->shape()[rank() - 2] && "Inner dimensions must match for matrix multiplication");
 
     if (rank() == 2){
+        // matmul_avx2 assumes row-major contiguous (raw i*K+k indexing)
+        TensorPtr a_contig = is_contiguous() ? nullptr : contiguous();
+        TensorPtr b_contig = other->is_contiguous() ? nullptr : other->contiguous();
+        const scalar_t* a_ptr = a_contig ? a_contig->data_->data() : data_->data() + offset_;
+        const scalar_t* b_ptr = b_contig ? b_contig->data_->data() : other->data_->data() + other->offset_;
+
         size_t M = shape_[0];
         size_t K = shape_[1];
         size_t N = other->shape()[1];
@@ -566,15 +630,8 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
             for each sample and each neuron the full input dot weights is stored in output tensor
         */
-        for (size_t i = 0; i < M; i++) {
-            for (size_t j = 0; j < N; j++) {
-                scalar_t sum = 0.0f;
-                for (size_t k = 0; k < K; k++) {
-                    sum += at({i, k}) * other->at({k, j});
-                }
-                output_tensor->at({i, j}) = sum;
-            }
-        }
+
+        Tensor::matmul_avx2(a_ptr, b_ptr, output_tensor->mutable_data().data(), M, K, N);
 
         auto self = std::const_pointer_cast<Tensor>(shared_from_this());
 
@@ -623,6 +680,12 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
         */
         assert(shape_[0] == other->shape()[0] && "Leading (head) dimension must match for batched matmul");
 
+        // same reasoning as the rank-2 branch
+        TensorPtr a_contig = is_contiguous() ? nullptr : contiguous();
+        TensorPtr b_contig = other->is_contiguous() ? nullptr : other->contiguous();
+        const scalar_t* a_base = a_contig ? a_contig->data_->data() : data_->data() + offset_;
+        const scalar_t* b_base = b_contig ? b_contig->data_->data() : other->data_->data() + other->offset_;
+
         size_t L = shape_[0];
         size_t M = shape_[1];
         size_t K = shape_[2];
@@ -633,17 +696,13 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
         if (requires_grad_ || other->requires_grad_)
             output_tensor->requires_grad_ = true;
 
-        // same M/N/K dot-product as the 2D case, just looped once per leading (head) slice
         for (size_t l = 0; l < L; l++) {
-            for (size_t m = 0; m < M; m++) {
-                for (size_t n = 0; n < N; n++) {
-                    scalar_t sum = 0.0f;
-                    for (size_t k = 0; k < K; k++) {
-                        sum += at({l, m, k}) * other->at({l, k, n});
-                    }
-                    output_tensor->at({l, m, n}) = sum;
-                }
-            }
+            Tensor::matmul_avx2(
+                a_base + l * M * K,
+                b_base + l * K * N,
+                output_tensor->mutable_data().data() + l * M * N,
+                M, K, N
+            );
         }
 
         auto self = std::const_pointer_cast<Tensor>(shared_from_this());
