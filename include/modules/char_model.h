@@ -8,6 +8,7 @@
 #include "modules/pos_embed.h"
 #include "modules/transformer_block.h"
 #include <cassert>
+#include "infer/sampler.h"
 
 class CharModel : public Layer{
     private:
@@ -19,8 +20,16 @@ class CharModel : public Layer{
         PositionalEmbed positional_embedding_layer_;
         std::vector<TransformerBlock> transformer_blocks_;
 
-        //note: final linear layer to have proper output of vocab size 
-        Linear lm_head_; 
+        //note: final linear layer to have proper output of vocab size
+        Linear lm_head_;
+
+        // pulls a single [vocab_size] row out of a [rows, vocab_size] logits tensor
+        TensorPtr extract_row(const TensorPtr& t, size_t row) const {
+            std::vector<scalar_t> row_data;
+            for (size_t j = 0; j < vocab_size_; j++)
+                row_data.push_back(t->at({row, j}));
+            return Tensor::from_vector(row_data);
+        }
 
     public:
         CharModel(size_t vocab_size, size_t embedding_dim, size_t num_heads, size_t num_transformer_blocks)
@@ -103,6 +112,51 @@ class CharModel : public Layer{
             //use those embeddings to get logits which go into the sampler to find next token!
             return lm_head_.forward(x); 
         }
+
+
+        std::vector<size_t> generate(const std::vector<size_t>& prompt, Sampler& sampler, size_t max_new_tokens, float temperature, size_t top_k){
+            /*
+                input prompt -> vector of token IDs
+                output -> vector of token IDs (prompt + generated tokens)
+            */
+            assert(max_new_tokens >= 1 && "max_new_tokens must be at least 1");
+
+            std::vector<KVCache> kv_caches(transformer_blocks_.size()); 
+
+            std::vector<scalar_t> prompt_data;
+            for (size_t id : prompt){ //int -> float
+                prompt_data.push_back(static_cast<scalar_t>(id));
+            }
+
+            //basic tensor with the prompt ids 
+            auto prompt_tensor = Tensor::from_vector(prompt_data);
+
+            //prefill the KVCache with the prompt
+            auto logits = forward(prompt_tensor, kv_caches);
+
+            //logits of the "prediction" send to sampler for next token id
+            auto last_logits = extract_row(logits, logits->shape()[0] - 1);
+            auto next_token_id = sampler.sample(last_logits, temperature, top_k);
+
+            //add new token to the output prompt
+            std::vector<size_t> generated_tokens = prompt;
+            generated_tokens.push_back(next_token_id);
+
+            for (size_t i = 0; i < max_new_tokens - 1; i++){
+                auto new_token_tensor = Tensor::from_vector({static_cast<scalar_t>(next_token_id)});
+
+                logits = forward(new_token_tensor, kv_caches);
+
+                last_logits = extract_row(logits, logits->shape()[0] - 1);
+                next_token_id = sampler.sample(last_logits, temperature, top_k);
+
+                generated_tokens.push_back(next_token_id);
+
+            }
+
+            return generated_tokens;
+
+        }   
 
 
 };
