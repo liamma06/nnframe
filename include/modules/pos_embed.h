@@ -5,6 +5,7 @@
 #include "modules/layer.h"
 #include "cmath"
 
+
 class PositionalEmbed : public Layer{
     public:
         TensorPtr forward(const TensorPtr& input) override{
@@ -34,4 +35,30 @@ class PositionalEmbed : public Layer{
         }
 
         std::vector<TensorPtr> parameters() const override { return {}; }
+
+        /*
+            problem is that during decode for infer it 1 token at a time
+            This mean with start_pos every token is just at 0
+            we need to include how many prior tokens to get the right
+            positional encoding for the new token.
+        */
+        TensorPtr forward(const TensorPtr& input, size_t start_pos){
+            size_t seq_length = input->shape()[0];
+            size_t embed_dim = input->shape()[1];
+
+            auto output_tensor = Tensor::create({seq_length, embed_dim});
+
+            for (size_t pos = 0; pos < seq_length; pos++){
+                for (size_t i = 0; i < embed_dim; i++){
+                    size_t actual_pos = start_pos + pos;
+                    if (i % 2 == 0){
+                        output_tensor->at({pos, i}) = std::sin(actual_pos / std::pow(10000.0f, static_cast<float>(i) / embed_dim));
+                    } else {
+                        output_tensor->at({pos, i}) = std::cos(actual_pos / std::pow(10000.0f, static_cast<float>(i - 1) / embed_dim));
+                    }
+                }
+            }
+
+            return input->add(output_tensor);
+        }
 };

@@ -54,7 +54,8 @@ class CharModel : public Layer{
 
             return params;
         };
-            
+        
+        //from my understanding this is more so the training forwardpass
         TensorPtr forward(const TensorPtr& input) override{
             /*
                 input: [seq_length]
@@ -76,6 +77,31 @@ class CharModel : public Layer{
             }
 
             return lm_head_.forward(x);
+        }
+
+        TensorPtr forward(const TensorPtr& input, std::vector<KVCache>& kv_caches){
+            /*
+                -same as above but pass in KVCache 
+                -used for prefill and decode (inference)
+                -track token for the position forward
+            */
+
+            assert(kv_caches.size() == transformer_blocks_.size() && "must have one KVCache per transformer block");
+
+            TensorPtr x = embedding_layer_.forward(input);
+
+            
+
+            size_t start_pos = kv_caches[0].get_k() ? kv_caches[0].get_k()->shape()[1] : 0;
+            x = positional_embedding_layer_.forward(x, start_pos);
+
+            //represent change in the embeddings (each gets thier own KVCache)
+            for (size_t i = 0; i < transformer_blocks_.size(); i++){
+                x = transformer_blocks_[i].forward(x, kv_caches[i]);
+            }
+
+            //use those embeddings to get logits which go into the sampler to find next token!
+            return lm_head_.forward(x); 
         }
 
 
