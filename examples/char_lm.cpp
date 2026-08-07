@@ -1,7 +1,8 @@
 #include "core/tensor.h"
 #include "modules/char_model.h"
 #include "loss/cross_entrop.h"
-#include "optim/adamw.h"  
+#include "optim/adamw.h"
+#include "infer/sampler.h"
 #include <iostream>
 #include <vector>
 #include <string>
@@ -60,7 +61,17 @@ int main(){
         }
     }
 
+    // build reverse mapping (idx -> char) so generated token ids can be printed as text
+    std::vector<char> idx_to_char(vocab_size);
+    for (auto& [c, i] : char_to_idx) idx_to_char[i] = c;
 
+    std::vector<size_t> seed_prompt = {tokenized[0], tokenized[1], tokenized[2]};
+    Sampler sampler(42);
+    auto generated = model.generate(seed_prompt, sampler, 20, 0.8f, 3);
 
-
+    std::cout << "\nSeed: ";
+    for (size_t id : seed_prompt) std::cout << idx_to_char[id];
+    std::cout << "\nGenerated: ";
+    for (size_t id : generated) std::cout << idx_to_char[id];
+    std::cout << std::endl;
 }

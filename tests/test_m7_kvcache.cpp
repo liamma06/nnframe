@@ -4,6 +4,7 @@
 #include "infer/kv_cache.h"
 #include "modules/attention.h"
 #include "infer/sampler.h"
+#include "modules/char_model.h"
 
 namespace {
     // pulls out rows [start, start+count) as a fresh [count, embed_dim] tensor
@@ -165,4 +166,60 @@ TEST_CASE("Sampler: never picks a token outside the top_k set") {
     // over 100 trials with 2 valid candidates, both should show up at least once
     CHECK(saw_idx3);
     CHECK(saw_idx2);
+}
+
+TEST_CASE("CharModel::generate - correct length, prompt preserved, valid token ids") {
+    const size_t vocab_size = 10, embed_dim = 8, num_heads = 2, num_blocks = 2;
+    CharModel model(vocab_size, embed_dim, num_heads, num_blocks);
+    std::vector<size_t> prompt = {1, 2, 3};
+    Sampler sampler(42);
+
+    auto result = model.generate(prompt, sampler, 5, 1.0f, 3);
+
+    CHECK(result.size() == prompt.size() + 5);
+    for (size_t i = 0; i < prompt.size(); i++)
+        CHECK(result[i] == prompt[i]); // prompt preserved unchanged at the start
+    for (size_t id : result)
+        CHECK(id < vocab_size); // every generated id is a valid token
+}
+
+TEST_CASE("CharModel::generate - same seed produces identical output") {
+    const size_t vocab_size = 10, embed_dim = 8, num_heads = 2, num_blocks = 2;
+    CharModel model(vocab_size, embed_dim, num_heads, num_blocks);
+    std::vector<size_t> prompt = {1, 2, 3};
+
+    Sampler sampler1(123), sampler2(123);
+    auto result1 = model.generate(prompt, sampler1, 5, 1.0f, 3);
+    auto result2 = model.generate(prompt, sampler2, 5, 1.0f, 3);
+
+    CHECK(result1 == result2);
+}
+
+TEST_CASE("CharModel::generate - top_k=1 matches argmax from plain non-cached forward") {
+    // strongest correctness check: proves the cached path (embed/pos/blocks/lm_head,
+    // all through the KVCache) produces the same result as the plain forward, not
+    // just that SelfAttention alone does
+    const size_t vocab_size = 10, embed_dim = 8, num_heads = 2, num_blocks = 2;
+    CharModel model(vocab_size, embed_dim, num_heads, num_blocks);
+    std::vector<size_t> prompt = {1, 2, 3};
+
+    // ground truth: plain forward, manual argmax on the last row
+    std::vector<scalar_t> prompt_data;
+    for (auto id : prompt) prompt_data.push_back(static_cast<scalar_t>(id));
+    auto prompt_tensor = Tensor::from_vector(prompt_data);
+    auto logits = model.forward(prompt_tensor);
+
+    size_t last_row = logits->shape()[0] - 1;
+    size_t expected_argmax = 0;
+    scalar_t best = logits->at({last_row, 0});
+    for (size_t j = 1; j < vocab_size; j++) {
+        scalar_t v = logits->at({last_row, j});
+        if (v > best) { best = v; expected_argmax = j; }
+    }
+
+    Sampler sampler(42);
+    auto result = model.generate(prompt, sampler, 1, 1.0f, 1); // top_k=1 -> deterministic argmax
+
+    CHECK(result.size() == prompt.size() + 1);
+    CHECK(result.back() == expected_argmax);
 }
