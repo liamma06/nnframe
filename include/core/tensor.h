@@ -24,12 +24,9 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
 
         Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset); // takes in data ptr so no need to recopy/buffer
 
-        //SIMD malmul call (cant pass tensor only scalar pointer)
-        static void matmul_avx2(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
-        //plain scalar matmul
-        static void matmul_scalar(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
+    public:
 
-    public: 
+
         Tensor(std::vector<size_t> shape, scalar_t fill_value = 0.0f); 
         Tensor (std::vector<size_t> shape, std::vector<scalar_t> data);
 
@@ -89,4 +86,19 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         static TensorPtr create(std::vector<size_t> shape, scalar_t fill = 0.0f);
         static TensorPtr zeros(std::vector<size_t> shape);
         static TensorPtr from_vector(std::vector<scalar_t> data); // rank-1 tensor, shape inferred as {data.size()}
+
+
+        //SIMD malmul call (cant pass tensor only scalar pointer)
+        static void matmul_avx2(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
+        //plain scalar matmul, 
+        static void matmul_scalar(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N);
+
+        //SIMD matmul grad
+        static void matmul_grad_avx2(const scalar_t* upstream, const scalar_t* self, const scalar_t* other, scalar_t* self_grad, scalar_t* other_grad, size_t M, size_t K, size_t N);
+        //plain matmul gradient calc
+        static void matmul_grad_scalar(const scalar_t* upstream, const scalar_t* self, const scalar_t* other, scalar_t* self_grad, scalar_t* other_grad, size_t M, size_t K, size_t N);
+
+        // raw-buffer transpose: in is [rows,cols] row-major, out is filled as [cols,rows]
+        static void transpose_buffer(const scalar_t* in, scalar_t* out, size_t rows, size_t cols);
+
 };

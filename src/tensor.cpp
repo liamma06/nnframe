@@ -601,6 +601,58 @@ void Tensor::matmul_scalar(const scalar_t* a, const scalar_t* b, scalar_t* out, 
     }
 }
 
+void Tensor::matmul_grad_avx2(const scalar_t* upstream, const scalar_t* self, const scalar_t* other, scalar_t* self_grad, scalar_t* other_grad, size_t M, size_t K, size_t N) {
+    // self_grad += upstream @ other^T
+    std::vector<scalar_t> other_T(N * K);
+    transpose_buffer(other, other_T.data(), K, N); //  [K,N] -> [N,K]
+
+    std::vector<scalar_t> temp1(M * K);
+    matmul_avx2(upstream, other_T.data(), temp1.data(), M, N, K);
+    for (size_t i = 0; i < M * K; i++){
+        self_grad[i] += temp1[i];
+    } 
+
+    // other_grad += self^T @ upstream
+    std::vector<scalar_t> self_T(K * M);
+    transpose_buffer(self, self_T.data(), M, K); // [M,K] -> [K,M]
+
+    std::vector<scalar_t> temp2(K * N);
+    matmul_avx2(self_T.data(), upstream, temp2.data(), K, M, N);
+    for (size_t i = 0; i < K * N; i++){
+        other_grad[i] += temp2[i];
+    } 
+}
+
+void Tensor::transpose_buffer(const scalar_t* in, scalar_t* out, size_t rows, size_t cols) {
+    for (size_t i = 0; i < rows; i++) {
+        for (size_t j = 0; j < cols; j++) {
+            out[j * rows + i] = in[i * cols + j];
+        }
+    }
+}
+
+void Tensor::matmul_grad_scalar(const scalar_t* upstream, const scalar_t* self, const scalar_t* other, scalar_t* self_grad, scalar_t* other_grad, size_t M, size_t K, size_t N) {
+    for (size_t i = 0; i < M; i++) {
+        for (size_t k = 0; k < K; k++) {
+            scalar_t sum = 0.0f;
+            for (size_t j = 0; j < N; j++) {
+                sum += upstream[i * N + j] * other[k * N + j];
+            }
+            self_grad[i * K + k] += sum;
+        }
+    }
+
+    for (size_t k = 0; k < K; k++) {
+        for (size_t j = 0; j < N; j++) {
+            scalar_t sum = 0.0f;
+            for (size_t i = 0; i < M; i++) {
+                sum += self[i * K + k] * upstream[i * N + j];
+            }
+            other_grad[k * N + j] += sum;
+        }
+    }
+}
+
 TensorPtr Tensor::matmul(const TensorPtr& other) const {
     assert(rank() == other->rank() && (rank() == 2 || rank() == 3) && "Both tensors must be rank 2 or rank 3, and match each other");
     assert(shape_[rank() - 1] == other->shape()[rank() - 2] && "Inner dimensions must match for matrix multiplication");
@@ -636,40 +688,27 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
         auto self = std::const_pointer_cast<Tensor>(shared_from_this());
 
         output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
-        output_tensor->grad_fn_ = [self, other](const Tensor& upstream) {
-            
-            if (self->requires_grad_) {
-                if (!self->grad_) {
-                    self->grad_ = Tensor::create(self->shape_);
-                }
+        output_tensor->grad_fn_ = [self, other, a_contig, b_contig, M, K, N](const Tensor& upstream) {            if (self->requires_grad_ || other->requires_grad_) {
+                self->init_grad();
+                other->init_grad();
+                
+                /*
+                    if Tensor alreayd laid out normally in memory -> contiguous 
+                    - use the data pointer directly
 
-                // Gradient w.r.t self: upstream * other^T
-                for (size_t i = 0; i < self->shape_[0]; i++) {
-                    for (size_t k = 0; k < self->shape_[1]; k++) {
-                        scalar_t sum = 0.0f;
-                        for (size_t j = 0; j < other->shape()[1]; j++) {
-                            sum += upstream.at({i, j}) * other->at({k, j});
-                        }
-                        self->grad_->at({i, k}) += sum;
-                    }
-                }
-            }
+                    else -> use the clean copy already made. 
+                */
+                const scalar_t* self_ptr = a_contig ? a_contig->data_->data() : self->data_->data() + self->offset_;
+                const scalar_t* other_ptr = b_contig ? b_contig->data_->data() : other->data_->data() + other->offset_;
 
-            if (other->requires_grad_) {
-                if (!other->grad_) {
-                    other->grad_ = Tensor::create(other->shape_);
-                }
-
-                // Gradient w.r.t other: self^T * upstream
-                for (size_t k = 0; k < other->shape()[0]; k++) {
-                    for (size_t j = 0; j < other->shape()[1]; j++) {
-                        scalar_t sum = 0.0f;
-                        for (size_t i = 0; i < self->shape_[0]; i++) {
-                            sum += self->at({i, k}) * upstream.at({i, j});
-                        }
-                        other->grad_->at({k, j}) += sum;
-                    }
-                }
+                Tensor::matmul_grad_avx2(
+                    upstream.data().data(),
+                    self_ptr,
+                    other_ptr,
+                    self->grad().mutable_data().data(),
+                    other->grad().mutable_data().data(),
+                    M, K, N
+                );
             }
         };
 
@@ -707,35 +746,23 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
         auto self = std::const_pointer_cast<Tensor>(shared_from_this());
         output_tensor->inputs_ = std::vector<TensorPtr>{self, other}; //parents
-        output_tensor->grad_fn_ = [self, other, L, M, K, N](const Tensor& upstream) {
-
-            if (self->requires_grad_) {
+        output_tensor->grad_fn_ = [self, other, a_contig, b_contig, L, M, K, N](const Tensor& upstream) {
+            if (self->requires_grad_ || other->requires_grad_) {
                 self->init_grad();
-                for (size_t l = 0; l < L; l++) {
-                    for (size_t m = 0; m < M; m++) {
-                        for (size_t k = 0; k < K; k++) {
-                            scalar_t sum = 0.0f;
-                            for (size_t n = 0; n < N; n++) {
-                                sum += upstream.at({l, m, n}) * other->at({l, k, n});
-                            }
-                            self->grad_->at({l, m, k}) += sum;
-                        }
-                    }
-                }
-            }
-
-            if (other->requires_grad_) {
                 other->init_grad();
+
+                const scalar_t* self_base = a_contig ? a_contig->data_->data() : self->data_->data() + self->offset_;
+                const scalar_t* other_base = b_contig ? b_contig->data_->data() : other->data_->data() + other->offset_;
+
                 for (size_t l = 0; l < L; l++) {
-                    for (size_t k = 0; k < K; k++) {
-                        for (size_t n = 0; n < N; n++) {
-                            scalar_t sum = 0.0f;
-                            for (size_t m = 0; m < M; m++) {
-                                sum += self->at({l, m, k}) * upstream.at({l, m, n});
-                            }
-                            other->grad_->at({l, k, n}) += sum;
-                        }
-                    }
+                    Tensor::matmul_grad_avx2(
+                        upstream.data().data() + l * M * N,
+                        self_base + l * M * K,
+                        other_base + l * K * N,
+                        self->grad().mutable_data().data() + l * M * K,
+                        other->grad().mutable_data().data() + l * K * N,
+                        M, K, N
+                    );
                 }
             }
         };
