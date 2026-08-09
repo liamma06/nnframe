@@ -18,13 +18,17 @@ A neural network framework built from scratch in C++17. No external math librari
 
 ## Milestones
 
-- **M0** — Project setup (current)
+- **M0** — Project setup
 - **M1** — Tensor (flat buffer + strides, element-wise ops, matmul, reshape, broadcasting)
 - **M2** — Autograd (computation graph, backward pass, gradient checking)
 - **M3** — Layers (Linear, ReLU, GELU, sequential container)
 - **M4** — Loss + optimizer (MSE, plain gradient descent)
 - **M5** — Training loop, proof target: XOR
 - **M6** — Transformer support (attention, LayerNorm, positional encoding), proof target: tiny character-level model
+- **M7** — Inference (lean): real multi-head attention (split/concat heads, currently cosmetic), KV cache, autoregressive generation with temperature/top-k sampling (current)
+- **M8** — SIMD: profile the CPU loop, AVX2-vectorize the hot ops (expect matmul), benchmark before/after
+- **M9** — CUDA backend: device memory management, custom matmul kernel, port training + inference to GPU, correctness-check against CPU reference. Go slow here — prioritize understanding GPU architecture (memory model, warps/threads/blocks) over speed of implementation
+- **M10** — Inference revisited: serving-style techniques (continuous batching, paged KV cache) now that a GPU backend exists to batch on
 
 ## Repo layout
 
