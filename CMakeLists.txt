@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(nnframe VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(MSVC)
-    add_compile_options(/arch:AVX2)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2>)
 endif()
 
 add_executable(nnframe src/main.cpp)
@@ -43,3 +43,11 @@ target_include_directories(kv_cache_benchmark PRIVATE include)
 
 add_executable(matmul_benchmark examples/matmul_benchmark.cpp src/tensor.cpp)
 target_include_directories(matmul_benchmark PRIVATE include)
+
+option(NNFRAME_WITH_CUDA "Build CUDA targets" ON)
+
+if(NNFRAME_WITH_CUDA)
+    enable_language(CUDA)
+    set(CMAKE_CUDA_ARCHITECTURES native)
+
+endif()
