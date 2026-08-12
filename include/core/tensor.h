@@ -7,6 +7,11 @@ using scalar_t = float; //might change later
 class Tensor; // forward declaration so TensorPtr can reference it
 using TensorPtr = std::shared_ptr<Tensor>;
 
+enum class Device {
+    CPU,
+    CUDA
+};
+
 class Tensor : public std::enable_shared_from_this<Tensor> {
     private: 
         std::shared_ptr<std::vector<scalar_t>> data_; //pointer to tensor data
@@ -24,8 +29,11 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
 
         Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset); // takes in data ptr so no need to recopy/buffer
 
-    public:
+        //device separation
+        Device device_ = Device::CPU; 
+        scalar_t* device_data_ = nullptr; // equivalent of data_ but GPU needs pointers 
 
+    public:
 
         Tensor(std::vector<size_t> shape, scalar_t fill_value = 0.0f); 
         Tensor (std::vector<size_t> shape, std::vector<scalar_t> data);
@@ -100,5 +108,14 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
 
         // raw-buffer transpose: in is [rows,cols] row-major, out is filled as [cols,rows]
         static void transpose_buffer(const scalar_t* in, scalar_t* out, size_t rows, size_t cols);
+
+        //DEVICE SEPARATION
+        Tensor(const Tensor& other); 
+        Tensor& operator=(const Tensor& other);
+
+        ~Tensor(); //destructor 
+
+        Device device() const;
+        TensorPtr to(Device device) const; //new tensor on specified device. 
 
 };

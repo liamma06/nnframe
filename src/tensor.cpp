@@ -3,6 +3,8 @@
 #include <numeric>
 #include <cmath>
 #include <unordered_set>
+#include <algorithm>
+#include <stdexcept>
 
 #include <immintrin.h> //AVX2
 
@@ -82,8 +84,10 @@ size_t Tensor::rank() const {
     return shape_.size();
 }
 
-size_t Tensor:: numel() const{
-    return data_->size(); //pointer access 
+size_t Tensor::numel() const{
+    size_t n = 1;
+    for (size_t s : shape_) n *= s;
+    return n;
 }
 
 bool Tensor::is_contiguous() const {
@@ -958,3 +962,96 @@ TensorPtr Tensor::log() const {
     return output_tensor;
 }
 
+//DEVICE SEPARATION
+Tensor::Tensor(const Tensor& other){
+    if(other.device_ == Device::CUDA){
+        //CUDA only refer by pointers, so cant copy like tensorptrs 
+        throw std::runtime_error("cannot copy a GPU tensor to a CPU tensor");
+    }
+
+    data_ = other.data_;
+    shape_ = other.shape_;
+    strides_ = other.strides_;
+    offset_ = other.offset_;
+    requires_grad_ = other.requires_grad_;
+    grad_ = other.grad_;
+    inputs_ = other.inputs_;
+    grad_fn_ = other.grad_fn_;
+    device_ = other.device_;
+}
+
+//this different because if it already exists we replace while the one above make whole new tensor 
+Tensor& Tensor::operator=(const Tensor& other){
+    if(other.device_ == Device::CUDA){
+        throw std::runtime_error("cannot copy a GPU tensor to a CPU tensor");
+    }
+
+    data_ = other.data_;
+    shape_ = other.shape_;
+    strides_ = other.strides_;
+    offset_ = other.offset_;
+    requires_grad_ = other.requires_grad_;
+    grad_ = other.grad_;
+    inputs_ = other.inputs_;
+    grad_fn_ = other.grad_fn_;
+    device_ = other.device_;
+
+    return *this;
+}
+
+Tensor::~Tensor(){
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_data_ != nullptr) {
+            cudaFree(device_data_);
+        }
+    #endif
+}
+
+Device Tensor::device() const {
+    return device_;
+}
+
+TensorPtr Tensor::to(Device device) const{
+    if (device == device_){
+        return std::const_pointer_cast<Tensor>(shared_from_this());//same device no copy
+    }
+    if (device == Device::CUDA){
+        #ifdef NNFRAME_WITH_CUDA
+            auto src = contiguous(); //safety for GPU
+
+            size_t bytes = src->numel() * sizeof(scalar_t);
+            scalar_t* d_ptr = nullptr;
+
+            CUDA_CHECK(cudaMalloc(&d_ptr, bytes));
+            CUDA_CHECK(cudaMemcpy(d_ptr, src->data_->data(), bytes, cudaMemcpyHostToDevice));
+
+            //new tensor with GPU pointer, same shape and strides
+            auto result = TensorPtr(new Tensor(nullptr, src->shape_, src->strides_, 0));
+            result->device_ = Device::CUDA;
+            result->device_data_ = d_ptr; //gpu address pointer
+            return result;
+
+        #else
+            throw std::runtime_error("CUDA support not enabled");
+        #endif
+    }
+
+    if (device == Device::CPU){
+        #ifdef NNFRAME_WITH_CUDA
+            auto host_data = std::make_shared<std::vector<scalar_t>>(numel());
+
+            size_t bytes = numel() * sizeof(scalar_t);
+            CUDA_CHECK(cudaMemcpy(host_data->data(), device_data_, bytes, cudaMemcpyDeviceToHost));
+
+            auto result = TensorPtr(new Tensor(host_data, shape_, strides_, 0));
+            result->device_ = Device::CPU;
+            return result;
+        #else
+            throw std::runtime_error("CUDA support not enabled");
+        #endif
+
+    }
+
+    assert(false && "unreachable");
+    return nullptr;
+}
