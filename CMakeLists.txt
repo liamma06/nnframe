@@ -52,7 +52,9 @@ if(NNFRAME_WITH_CUDA)
 
     add_executable(test_m9 tests/test_m9_cuda.cpp src/cuda/matmul_cuda.cu src/tensor.cpp)
     target_include_directories(test_m9 PRIVATE include tests)
+    target_compile_definitions(test_m9 PRIVATE NNFRAME_WITH_CUDA)
 
     add_executable(matmul_cuda_benchmark examples/matmul_cuda_benchmark.cpp src/cuda/matmul_cuda.cu src/tensor.cpp)
     target_include_directories(matmul_cuda_benchmark PRIVATE include)
+    target_compile_definitions(matmul_cuda_benchmark PRIVATE NNFRAME_WITH_CUDA)
 endif()
