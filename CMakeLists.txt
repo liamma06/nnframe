@@ -50,4 +50,9 @@ if(NNFRAME_WITH_CUDA)
     enable_language(CUDA)
     set(CMAKE_CUDA_ARCHITECTURES native)
 
+    add_executable(test_m9 tests/test_m9_cuda.cpp src/cuda/matmul_cuda.cu src/tensor.cpp)
+    target_include_directories(test_m9 PRIVATE include tests)
+
+    add_executable(matmul_cuda_benchmark examples/matmul_cuda_benchmark.cpp src/cuda/matmul_cuda.cu src/tensor.cpp)
+    target_include_directories(matmul_cuda_benchmark PRIVATE include)
 endif()
