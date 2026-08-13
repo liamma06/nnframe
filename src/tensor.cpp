@@ -10,6 +10,7 @@
 
 #ifdef NNFRAME_WITH_CUDA
 #include "cuda/matmul_cuda.cuh"
+#include "cuda/elementwise_cuda.cuh"
 #endif
 
 namespace {
@@ -316,6 +317,29 @@ std::vector<scalar_t>& Tensor::mutable_data(){
 }
 
 TensorPtr Tensor::add(const TensorPtr& other) const{
+    if (device_ != other->device_){
+        throw std::runtime_error("Tensors must be on the same device for add");
+    }
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            if (shape_ != other->shape()){
+                throw std::runtime_error("CUDA add does not support broadcasting yet; shapes must match exactly");
+            }
+
+            size_t n = numel();
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+
+            add_cuda(device_data_, other->device_data_, d_out, n);
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
+
     size_t out_rank = std::max(rank(), other->rank()); //take the larger rank/size of the 2 tensors
     std::vector<size_t> new_shape(out_rank);
 
@@ -395,6 +419,29 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
 }
 
 TensorPtr Tensor::sub(const TensorPtr& other) const {
+    if (device_ != other->device_){
+        throw std::runtime_error("Tensors must be on the same device for sub");
+    }
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            if (shape_ != other->shape()){
+                throw std::runtime_error("CUDA sub does not support broadcasting yet; shapes must match exactly");
+            }
+
+            size_t n = numel();
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+
+            sub_cuda(device_data_, other->device_data_, d_out, n);
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
+
     size_t out_rank = std::max(rank(), other->rank());
     std::vector<size_t> new_shape(out_rank);
 
@@ -447,6 +494,29 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 }
 
 TensorPtr Tensor::mul(const TensorPtr& other) const {
+    if (device_ != other->device_){
+        throw std::runtime_error("Tensors must be on the same device for mul");
+    }
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            if (shape_ != other->shape()){
+                throw std::runtime_error("CUDA mul does not support broadcasting yet; shapes must match exactly");
+            }
+
+            size_t n = numel();
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+
+            mul_cuda(device_data_, other->device_data_, d_out, n);
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
+
     size_t out_rank = std::max(rank(), other->rank());
     std::vector<size_t> new_shape(out_rank);
 

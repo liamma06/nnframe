@@ -87,6 +87,64 @@ TEST_CASE("Tensor::matmul on GPU-resident tensors matches CPU Tensor::matmul"){
     }
 }
 
+TEST_CASE("Tensor::add/sub/mul on GPU-resident tensors match CPU"){
+    const size_t n = 100;
+
+    std::mt19937 rng(21);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<scalar_t> a_vals(n);
+    std::vector<scalar_t> b_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+    for (auto& v : b_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals);
+    TensorPtr b_cpu = Tensor::from_vector(b_vals);
+
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr b_gpu = b_cpu->to(Device::CUDA);
+
+    SUBCASE("add"){
+        TensorPtr cpu_result = a_cpu->add(b_cpu);
+        TensorPtr gpu_result = a_gpu->add(b_gpu)->to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
+    }
+
+    SUBCASE("sub"){
+        TensorPtr cpu_result = a_cpu->sub(b_cpu);
+        TensorPtr gpu_result = a_gpu->sub(b_gpu)->to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
+    }
+
+    SUBCASE("mul"){
+        TensorPtr cpu_result = a_cpu->mul(b_cpu);
+        TensorPtr gpu_result = a_gpu->mul(b_gpu)->to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
+    }
+}
+
+TEST_CASE("Tensor::add/sub/mul throw on device mismatch"){
+    TensorPtr a_cpu = Tensor::create({4});
+    TensorPtr b_cpu = Tensor::create({4});
+    TensorPtr b_gpu = b_cpu->to(Device::CUDA);
+
+    CHECK_THROWS_AS(a_cpu->add(b_gpu), std::runtime_error);
+    CHECK_THROWS_AS(a_cpu->sub(b_gpu), std::runtime_error);
+    CHECK_THROWS_AS(a_cpu->mul(b_gpu), std::runtime_error);
+}
+
+TEST_CASE("Tensor::add/sub/mul throw on shape mismatch when CUDA-resident (no broadcasting yet)"){
+    TensorPtr a_gpu = Tensor::create({4, 4})->to(Device::CUDA);
+    TensorPtr b_gpu = Tensor::create({4, 1})->to(Device::CUDA); // would broadcast on CPU, not supported on CUDA yet
+
+    CHECK_THROWS_AS(a_gpu->add(b_gpu), std::runtime_error);
+    CHECK_THROWS_AS(a_gpu->sub(b_gpu), std::runtime_error);
+    CHECK_THROWS_AS(a_gpu->mul(b_gpu), std::runtime_error);
+}
+
 TEST_CASE("Tensor::matmul rank-3 (batched) on GPU-resident tensors matches CPU Tensor::matmul"){
     const size_t L = 8, M = 12, K = 16, N = 10; // L heads, like multi-head attention
 
