@@ -42,3 +42,16 @@ void mul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+__global__ void log_kernel(const scalar_t* in, scalar_t* out, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = logf(in[i]); // logf = float version, matches scalar_t precision
+}
+
+void log_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    log_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}

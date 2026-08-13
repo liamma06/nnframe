@@ -4,3 +4,4 @@
 void add_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t n);
 void sub_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t n);
 void mul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t n);
+void log_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n);

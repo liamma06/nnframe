@@ -1062,6 +1062,21 @@ TensorPtr Tensor::softmax(size_t dim) const{
 }
 
 TensorPtr Tensor::log() const {
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            size_t n = numel();
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+
+            log_cuda(device_data_, d_out, n);
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
+
     auto output_tensor = Tensor::create(shape_);
     for (size_t i = 0; i < numel(); i++)
         output_tensor->mutable_data()[i] = std::log(data()[i]);
