@@ -8,6 +8,10 @@
 
 #include <immintrin.h> //AVX2
 
+#ifdef NNFRAME_WITH_CUDA
+#include "cuda/matmul_cuda.cuh"
+#endif
+
 namespace {
     //func to see if we can increment index (odometer style)
     bool increment_index(std::vector<size_t>& idx, const std::vector<size_t>& shape){
