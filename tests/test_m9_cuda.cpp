@@ -4,6 +4,7 @@
 #include "cuda/matmul_cuda.cuh"
 #include <vector>
 #include <random>
+#include <stdexcept>
 
 TEST_CASE("CUDA matmul matches scalar reference(64x64x64)"){
     const size_t M = 64, K = 64, N = 64;
@@ -50,6 +51,48 @@ TEST_CASE("CUDA matmul matches scalar reference(64x64x64)"){
     CUDA_CHECK(cudaFree(d_a));
     CUDA_CHECK(cudaFree(d_b));
     CUDA_CHECK(cudaFree(d_out));
+}
+
+TEST_CASE("Tensor::matmul on GPU-resident tensors matches CPU Tensor::matmul"){
+    const size_t M = 32, K = 16, N = 24;
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<scalar_t> a_vals(M * K);
+    std::vector<scalar_t> b_vals(K * N);
+    for (auto& v : a_vals) v = dist(rng);
+    for (auto& v : b_vals) v = dist(rng);
+
+    // build CPU tensors and compute the reference result via Tensor::matmul (CPU path)
+    TensorPtr a_cpu = Tensor::from_vector(a_vals)->reshape({M, K});
+    TensorPtr b_cpu = Tensor::from_vector(b_vals)->reshape({K, N});
+    TensorPtr cpu_result = a_cpu->matmul(b_cpu);
+
+    // move both operands to the GPU and run the same matmul through the CUDA dispatch branch
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr b_gpu = b_cpu->to(Device::CUDA);
+    TensorPtr gpu_result = a_gpu->matmul(b_gpu);
+
+    CHECK(gpu_result->device() == Device::CUDA);
+
+    // bring the GPU result back to host so we can compare it against the CPU reference
+    TensorPtr gpu_result_host = gpu_result->to(Device::CPU);
+
+    REQUIRE(gpu_result_host->shape() == cpu_result->shape());
+    for (size_t i = 0; i < M; i++) {
+        for (size_t j = 0; j < N; j++) {
+            CHECK(gpu_result_host->at({i, j}) == doctest::Approx(cpu_result->at({i, j})).epsilon(1e-3f));
+        }
+    }
+}
+
+TEST_CASE("Tensor::matmul throws when operands are on different devices"){
+    TensorPtr a_cpu = Tensor::create({4, 4});
+    TensorPtr b_cpu = Tensor::create({4, 4});
+    TensorPtr b_gpu = b_cpu->to(Device::CUDA);
+
+    CHECK_THROWS_AS(a_cpu->matmul(b_gpu), std::runtime_error);
 }
 
 TEST_CASE("CUDA matmul matches scalar reference, non-multiple-of-16 (50x50x50)"){

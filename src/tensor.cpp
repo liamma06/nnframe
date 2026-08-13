@@ -665,6 +665,36 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
     assert(rank() == other->rank() && (rank() == 2 || rank() == 3) && "Both tensors must be rank 2 or rank 3, and match each other");
     assert(shape_[rank() - 1] == other->shape()[rank() - 2] && "Inner dimensions must match for matrix multiplication");
 
+    if (device_ != other->device_){
+        throw std::runtime_error("Tensors must be on the same device for matmul");
+    }
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            if(rank() != 2){
+                throw std::runtime_error("not supported yet for CUDA");
+            }
+
+            size_t M = shape_[0];
+            size_t K = shape_[1];
+            size_t N = other->shape()[1];
+
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
+
+            matmul_cuda(device_data_, other->device_data_, d_out, M, K, N);
+
+            //new tensor on GPU
+            auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{M,N}, std::vector<size_t>{N,1}, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+
+        }
+    #endif
+
+
+
     if (rank() == 2){
         // matmul_avx2 assumes row-major contiguous (raw i*K+k indexing)
         TensorPtr a_contig = is_contiguous() ? nullptr : contiguous();
