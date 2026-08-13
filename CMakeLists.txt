@@ -8,6 +8,13 @@ if(MSVC)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2>)
 endif()
 
+# optimization for release builds 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported)
+if(ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
+
 # Core CPU library.
 add_library(nnframe_core STATIC
     src/tensor.cpp
