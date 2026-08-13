@@ -671,25 +671,42 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
     #ifdef NNFRAME_WITH_CUDA
         if (device_ == Device::CUDA){
-            if(rank() != 2){
-                throw std::runtime_error("not supported yet for CUDA");
+            if(rank() == 2){
+                size_t M = shape_[0];
+                size_t K = shape_[1];
+                size_t N = other->shape()[1];
+
+                scalar_t* d_out = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
+
+                matmul_cuda(device_data_, other->device_data_, d_out, M, K, N);
+
+                //new tensor on GPU
+                auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{M,N}, std::vector<size_t>{N,1}, 0));
+                output_tensor->device_ = Device::CUDA;
+                output_tensor->device_data_ = d_out;
+                return output_tensor;
             }
+            if (rank() == 3){
+                
 
-            size_t M = shape_[0];
-            size_t K = shape_[1];
-            size_t N = other->shape()[1];
+                size_t L = shape_[0];
+                size_t M = shape_[1];
+                size_t K = shape_[2];
+                size_t N = other->shape()[2];
 
-            scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
+                assert(L == other->shape()[0] && "Leading (head) dimension must match for batched matmul");
 
-            matmul_cuda(device_data_, other->device_data_, d_out, M, K, N);
+                scalar_t* d_out = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_out, L * M * N * sizeof(scalar_t)));
 
-            //new tensor on GPU
-            auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{M,N}, std::vector<size_t>{N,1}, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
-            return output_tensor;
+                matmul_batched(device_data_, other->device_data_, d_out, M, K, N, L);
 
+                auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{L,M,N}, std::vector<size_t>{M*N,N,1}, 0));
+                output_tensor->device_ = Device::CUDA;
+                output_tensor->device_data_ = d_out;
+                return output_tensor;
+            }
         }
     #endif
 

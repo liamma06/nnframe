@@ -47,3 +47,30 @@ void matmul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size
     CUDA_CHECK(cudaDeviceSynchronize());
     
 }
+
+__global__ void matmul_batched_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N, size_t batch_size) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x; 
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int batch = blockIdx.z;
+
+    if (row < M && col < N && batch < batch_size){
+        scalar_t sum = 0;
+        for (int i = 0; i < K; i++){
+            sum += a[batch * M * K + row * K + i ] * b[batch * K * N + i * N + col];
+        }
+        out[batch * M * N + row * N + col] = sum;
+    }
+
+}
+
+void matmul_batched(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t M, size_t K, size_t N, size_t batch_size) {
+    /*
+        launch all batches in one kernel 
+    */
+
+    dim3 blockDim(16,16);
+    dim3 gridDim((N + 15) / 16, (M + 15) / 16, batch_size);
+    matmul_batched_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, M, K, N, batch_size);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
