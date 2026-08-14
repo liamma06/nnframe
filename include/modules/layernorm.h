@@ -51,7 +51,23 @@ class LayerNorm: public Layer{
 
                     layernorm_cuda(input->device_data(), gamma_->device_data(), beta_->device_data(), d_out, seq_len, embed_dim, 1e-5f);
 
-                    return Tensor::from_device_ptr(d_out, std::vector<size_t>{seq_len, embed_dim}, std::vector<size_t>{embed_dim, 1});
+                    auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{seq_len, embed_dim}, std::vector<size_t>{embed_dim, 1});
+
+                    auto self = std::const_pointer_cast<Tensor>(input->shared_from_this());
+                    auto gamma = gamma_;
+                    auto beta = beta_;
+                    output_tensor->set_requires_grad(true);
+                    output_tensor->set_inputs(std::vector<TensorPtr>{self, gamma, beta});
+                    output_tensor->set_grad_fn([self, gamma, beta, seq_len, embed_dim](const Tensor& upstream){
+                        self->init_grad();
+                        gamma->init_grad();
+                        beta->init_grad();
+                        layernorm_grad_cuda(upstream.device_data(), self->device_data(), gamma->device_data(),
+                                            self->grad().mutable_device_data(), gamma->grad().mutable_device_data(), beta->grad().mutable_device_data(),
+                                            seq_len, embed_dim, 1e-5f);
+                    });
+
+                    return output_tensor;
                 }
             #endif
 

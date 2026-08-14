@@ -7,6 +7,7 @@
 #include "cuda/layernorm_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
+#include "modules/layernorm.h"
 #include "loss/cross_entrop.h"
 #include <vector>
 #include <random>
@@ -906,4 +907,66 @@ TEST_CASE("CUDA softmax rank-3 backward via real Tensor::backward() matches CPU"
         for (size_t i = 0; i < S; i++)
             for (size_t j = 0; j < V; j++)
                 CHECK(a_grad_host->at({l, i, j}) == doctest::Approx(a_cpu->grad().at({l, i, j})).epsilon(1e-3f));
+}
+
+TEST_CASE("CUDA LayerNorm backward via real Tensor::backward() matches CPU"){
+    // LayerNorm's gamma/beta are always deterministically initialized (1.0 / 0.0, no RNG),
+    // so a fresh CPU LayerNorm and a manually-built GPU graph start from identical parameters.
+    const size_t seq_len = 6, embed_dim = 10;
+
+    std::mt19937 rng(73);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> input_vals(seq_len * embed_dim);
+    for (auto& v : input_vals) v = dist(rng);
+
+    // CPU reference, via the real LayerNorm class
+    LayerNorm ln_cpu(embed_dim);
+    TensorPtr input_cpu = Tensor::from_vector(input_vals)->reshape({seq_len, embed_dim});
+    input_cpu->set_requires_grad(true);
+    TensorPtr out_cpu = ln_cpu.forward(input_cpu);
+    out_cpu->backward();
+
+    TensorPtr gamma_grad_cpu = ln_cpu.parameters()[0]->grad().to(Device::CPU);
+    TensorPtr beta_grad_cpu = ln_cpu.parameters()[1]->grad().to(Device::CPU);
+
+    // GPU: LayerNorm's internal gamma_/beta_ can't be moved to CUDA (no setter), so this
+    // manually replicates LayerNorm::forward's CUDA branch, same as the embedding backward test.
+    TensorPtr gamma_gpu = Tensor::create({embed_dim}, 1.0f)->to(Device::CUDA);
+    gamma_gpu->set_requires_grad(true);
+    TensorPtr beta_gpu = Tensor::zeros({embed_dim})->to(Device::CUDA);
+    beta_gpu->set_requires_grad(true);
+    TensorPtr input_gpu = Tensor::from_vector(input_vals)->reshape({seq_len, embed_dim})->to(Device::CUDA);
+    input_gpu->set_requires_grad(true);
+
+    scalar_t* d_out = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embed_dim * sizeof(scalar_t)));
+    layernorm_cuda(input_gpu->device_data(), gamma_gpu->device_data(), beta_gpu->device_data(), d_out, seq_len, embed_dim, 1e-5f);
+    TensorPtr out_gpu = Tensor::from_device_ptr(d_out, std::vector<size_t>{seq_len, embed_dim}, std::vector<size_t>{embed_dim, 1});
+
+    out_gpu->set_requires_grad(true);
+    out_gpu->set_inputs(std::vector<TensorPtr>{input_gpu, gamma_gpu, beta_gpu});
+    out_gpu->set_grad_fn([input_gpu, gamma_gpu, beta_gpu, seq_len, embed_dim](const Tensor& upstream){
+        input_gpu->init_grad();
+        gamma_gpu->init_grad();
+        beta_gpu->init_grad();
+        layernorm_grad_cuda(upstream.device_data(), input_gpu->device_data(), gamma_gpu->device_data(),
+                             input_gpu->grad().mutable_device_data(), gamma_gpu->grad().mutable_device_data(), beta_gpu->grad().mutable_device_data(),
+                             seq_len, embed_dim, 1e-5f);
+    });
+
+    out_gpu->backward();
+
+    TensorPtr input_grad_host = input_gpu->grad().to(Device::CPU);
+    TensorPtr gamma_grad_host = gamma_gpu->grad().to(Device::CPU);
+    TensorPtr beta_grad_host = beta_gpu->grad().to(Device::CPU);
+
+    for (size_t i = 0; i < seq_len; i++)
+        for (size_t j = 0; j < embed_dim; j++)
+            CHECK(input_grad_host->at({i, j}) == doctest::Approx(input_cpu->grad().at({i, j})).epsilon(1e-3f));
+
+    for (size_t j = 0; j < embed_dim; j++){
+        CHECK(gamma_grad_host->at({j}) == doctest::Approx(gamma_grad_cpu->at({j})).epsilon(1e-3f));
+        CHECK(beta_grad_host->at({j}) == doctest::Approx(beta_grad_cpu->at({j})).epsilon(1e-3f));
+    }
 }
