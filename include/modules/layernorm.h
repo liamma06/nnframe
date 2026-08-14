@@ -2,8 +2,13 @@
 #include <vector>
 #include <memory>
 #include <cmath>
+#include <stdexcept>
 #include "core/tensor.h"
 #include "modules/layer.h"
+
+#ifdef NNFRAME_WITH_CUDA
+#include "cuda/layernorm_cuda.cuh"
+#endif
 
 class LayerNorm: public Layer{
 
@@ -32,8 +37,23 @@ class LayerNorm: public Layer{
                 input: embedding tensor
                 output: normalized tensor
             */
+            if (input->device() != gamma_->device() || input->device() != beta_->device()){
+                throw std::runtime_error("LayerNorm input, gamma, and beta must all be on the same device");
+            }
+
             size_t seq_len = input->shape()[0];
             size_t embed_dim = input->shape()[1];
+
+            #ifdef NNFRAME_WITH_CUDA
+                if (input->device() == Device::CUDA){
+                    scalar_t* d_out = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embed_dim * sizeof(scalar_t)));
+
+                    layernorm_cuda(input->device_data(), gamma_->device_data(), beta_->device_data(), d_out, seq_len, embed_dim, 1e-5f);
+
+                    return Tensor::from_device_ptr(d_out, std::vector<size_t>{seq_len, embed_dim}, std::vector<size_t>{embed_dim, 1});
+                }
+            #endif
 
             auto output_tensor = Tensor::create({seq_len, embed_dim});
             output_tensor->set_requires_grad(true);

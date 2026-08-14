@@ -88,6 +88,7 @@ if(NNFRAME_WITH_CUDA)
         src/cuda/optimizer_cuda.cu
         src/cuda/embed_cuda.cu
         src/cuda/loss_cuda.cu
+        src/cuda/layernorm_cuda.cu
     )
     target_include_directories(nnframe_core_cuda PUBLIC include)
     target_compile_definitions(nnframe_core_cuda PUBLIC NNFRAME_WITH_CUDA)

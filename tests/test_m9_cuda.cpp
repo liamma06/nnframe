@@ -4,12 +4,14 @@
 #include "cuda/matmul_cuda.cuh"
 #include "cuda/embed_cuda.cuh"
 #include "cuda/loss_cuda.cuh"
+#include "cuda/layernorm_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
 #include "loss/cross_entrop.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
+#include <cmath>
 
 TEST_CASE("CUDA matmul matches scalar reference(64x64x64)"){
     const size_t M = 64, K = 64, N = 64;
@@ -478,4 +480,64 @@ TEST_CASE("CUDA cross_entropy forward/backward match CPU CrossEntropy"){
     CUDA_CHECK(cudaFree(d_targets));
     CUDA_CHECK(cudaFree(d_loss));
     CUDA_CHECK(cudaFree(d_grad_logits));
+}
+
+TEST_CASE("CUDA layernorm matches scalar reference"){
+    const size_t rows = 5, cols = 20;
+    const scalar_t eps = 1e-5f;
+
+    std::mt19937 rng(29);
+    std::uniform_real_distribution<float> val_dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> h_input(rows * cols);
+    for (auto& v : h_input) v = val_dist(rng);
+
+    std::vector<scalar_t> h_gamma(cols);
+    std::vector<scalar_t> h_beta(cols);
+    for (auto& v : h_gamma) v = val_dist(rng);
+    for (auto& v : h_beta) v = val_dist(rng);
+
+    // scalar reference, mirrors LayerNorm::forward's CPU math exactly
+    std::vector<scalar_t> out_scalar(rows * cols);
+    for (size_t i = 0; i < rows; i++){
+        scalar_t mean = 0.0f;
+        for (size_t j = 0; j < cols; j++) mean += h_input[i * cols + j];
+        mean /= cols;
+
+        scalar_t variance = 0.0f;
+        for (size_t j = 0; j < cols; j++){
+            scalar_t diff = h_input[i * cols + j] - mean;
+            variance += diff * diff;
+        }
+        variance /= cols;
+
+        scalar_t inv_std = 1.0f / std::sqrt(variance + eps);
+        for (size_t j = 0; j < cols; j++){
+            scalar_t x_hat = (h_input[i * cols + j] - mean) * inv_std;
+            out_scalar[i * cols + j] = h_gamma[j] * x_hat + h_beta[j];
+        }
+    }
+
+    scalar_t *d_input, *d_gamma, *d_beta, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_input, h_input.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_gamma, h_gamma.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_beta, h_beta.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_out, rows * cols * sizeof(scalar_t)));
+
+    CUDA_CHECK(cudaMemcpy(d_input, h_input.data(), h_input.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_gamma, h_gamma.data(), h_gamma.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_beta, h_beta.data(), h_beta.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    layernorm_cuda(d_input, d_gamma, d_beta, d_out, rows, cols, eps);
+
+    std::vector<scalar_t> out_cuda(rows * cols);
+    CUDA_CHECK(cudaMemcpy(out_cuda.data(), d_out, out_cuda.size() * sizeof(scalar_t), cudaMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < rows * cols; i++)
+        CHECK(out_cuda[i] == doctest::Approx(out_scalar[i]).epsilon(1e-3f));
+
+    CUDA_CHECK(cudaFree(d_input));
+    CUDA_CHECK(cudaFree(d_gamma));
+    CUDA_CHECK(cudaFree(d_beta));
+    CUDA_CHECK(cudaFree(d_out));
 }
