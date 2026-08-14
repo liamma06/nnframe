@@ -7,6 +7,10 @@
 #include <random>
 #include <cassert>
 
+#ifdef NNFRAME_WITH_CUDA
+#include "cuda/embed_cuda.cuh"
+#endif
+
 
 
 class Embed: public Layer{
@@ -40,9 +44,24 @@ class Embed: public Layer{
 
         TensorPtr forward(const TensorPtr& input) override{
             /*
-                input: [seq_length] we only have 1D (batch size 1) for now 
+                input: [seq_length] we only have 1D (batch size 1) for now
                 output: [seq_length, embedding_dim]
             */
+            if (input->device() != embedding_matrix_->device()){
+                throw std::runtime_error("Embedding matrix and input indices must be on the same device");
+            }
+
+            #ifdef NNFRAME_WITH_CUDA
+                if (input->device() == Device::CUDA){
+                    size_t seq_len = input->numel();
+                    scalar_t* d_out = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embedding_dim_ * sizeof(scalar_t)));
+                    embed_cuda(embedding_matrix_->device_data(), input->device_data(), d_out, seq_len, embedding_dim_);
+
+                    return Tensor::from_device_ptr(d_out, {seq_len, embedding_dim_}, {embedding_dim_, 1});
+                }
+            #endif
+
             std::vector<size_t> new_input_shape = input->shape();
             auto output_tensor = Tensor::create({new_input_shape[0], embedding_dim_});
 

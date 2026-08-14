@@ -2,6 +2,7 @@
 #include "doctest.h"
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
+#include "cuda/embed_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
 #include <vector>
@@ -349,4 +350,75 @@ TEST_CASE("CUDA matmul matches scalar reference, non-multiple-of-16 (50x50x50)")
     CUDA_CHECK(cudaFree(d_a));
     CUDA_CHECK(cudaFree(d_b));
     CUDA_CHECK(cudaFree(d_out));
+}
+
+TEST_CASE("CUDA embedding forward/backward match a scalar reference"){
+    const size_t vocab_size = 10, embedding_dim = 8, seq_len = 6;
+
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> idx_dist(0, static_cast<int>(vocab_size) - 1);
+
+    std::vector<scalar_t> h_table(vocab_size * embedding_dim);
+    for (auto& v : h_table) v = val_dist(rng);
+
+    // indices as scalar_t, some repeated on purpose to exercise the atomicAdd scatter in backward
+    std::vector<scalar_t> h_indices(seq_len);
+    for (auto& v : h_indices) v = static_cast<scalar_t>(idx_dist(rng));
+
+    scalar_t *d_table, *d_indices, *d_out;
+    CUDA_CHECK(cudaMalloc(&d_table, h_table.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_indices, h_indices.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embedding_dim * sizeof(scalar_t)));
+
+    CUDA_CHECK(cudaMemcpy(d_table, h_table.data(), h_table.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_indices, h_indices.data(), h_indices.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    embed_cuda(d_table, d_indices, d_out, seq_len, embedding_dim);
+
+    std::vector<scalar_t> out_cuda(seq_len * embedding_dim);
+    CUDA_CHECK(cudaMemcpy(out_cuda.data(), d_out, out_cuda.size() * sizeof(scalar_t), cudaMemcpyDeviceToHost));
+
+    // scalar reference: gather
+    std::vector<scalar_t> out_scalar(seq_len * embedding_dim);
+    for (size_t i = 0; i < seq_len; i++) {
+        size_t token = static_cast<size_t>(h_indices[i]);
+        for (size_t d = 0; d < embedding_dim; d++)
+            out_scalar[i * embedding_dim + d] = h_table[token * embedding_dim + d];
+    }
+
+    for (size_t i = 0; i < seq_len * embedding_dim; i++)
+        CHECK(out_cuda[i] == doctest::Approx(out_scalar[i]).epsilon(1e-4f));
+
+    // backward: random upstream gradient
+    std::vector<scalar_t> h_grad_out(seq_len * embedding_dim);
+    for (auto& v : h_grad_out) v = val_dist(rng);
+
+    scalar_t *d_grad_out, *d_grad_table;
+    CUDA_CHECK(cudaMalloc(&d_grad_out, h_grad_out.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_grad_table, h_table.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMemset(d_grad_table, 0, h_table.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMemcpy(d_grad_out, h_grad_out.data(), h_grad_out.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    embed_backward_cuda(d_indices, d_grad_out, d_grad_table, seq_len, embedding_dim);
+
+    std::vector<scalar_t> grad_table_cuda(h_table.size());
+    CUDA_CHECK(cudaMemcpy(grad_table_cuda.data(), d_grad_table, grad_table_cuda.size() * sizeof(scalar_t), cudaMemcpyDeviceToHost));
+
+    // scalar reference: scatter-add
+    std::vector<scalar_t> grad_table_scalar(h_table.size(), 0.0f);
+    for (size_t i = 0; i < seq_len; i++) {
+        size_t token = static_cast<size_t>(h_indices[i]);
+        for (size_t d = 0; d < embedding_dim; d++)
+            grad_table_scalar[token * embedding_dim + d] += h_grad_out[i * embedding_dim + d];
+    }
+
+    for (size_t i = 0; i < h_table.size(); i++)
+        CHECK(grad_table_cuda[i] == doctest::Approx(grad_table_scalar[i]).epsilon(1e-4f));
+
+    CUDA_CHECK(cudaFree(d_table));
+    CUDA_CHECK(cudaFree(d_indices));
+    CUDA_CHECK(cudaFree(d_out));
+    CUDA_CHECK(cudaFree(d_grad_out));
+    CUDA_CHECK(cudaFree(d_grad_table));
 }
