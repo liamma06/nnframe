@@ -11,6 +11,7 @@
 #ifdef NNFRAME_WITH_CUDA
 #include "cuda/matmul_cuda.cuh"
 #include "cuda/elementwise_cuda.cuh"
+#include "cuda/softmax_cuda.cuh"
 #endif
 
 namespace {
@@ -971,6 +972,24 @@ TensorPtr Tensor::softmax(size_t dim) const{
     assert(dim < rank() && "Dimension out of bounds for softmax");
     assert((rank() == 2 || rank() == 3) && "softmax only supports rank 2 or rank 3");
     assert(dim == rank() - 1 && "softmax currently only supports normalizing the last axis");
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            // rwos = last dim 
+            size_t rows = (rank() == 2) ? shape_[0] : shape_[0] * shape_[1];
+            size_t row_size = shape_[rank() - 1];
+
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, rows * row_size * sizeof(scalar_t)));
+
+            softmax_cuda(device_data_, d_out, rows, row_size);
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
 
     TensorPtr output_tensor = Tensor::create(shape_);
 

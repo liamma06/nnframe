@@ -174,6 +174,57 @@ TEST_CASE("Tensor::mean on GPU-resident tensor matches CPU (spans multiple reduc
     CHECK(gpu_result->at({0}) == doctest::Approx(cpu_result->at({0})).epsilon(1e-3f));
 }
 
+TEST_CASE("Tensor::softmax rank-2 on GPU-resident tensor matches CPU (row_size > blockDim to exercise strided loop)"){
+    const size_t rows = 5, row_size = 600; // > 256, forces multiple strided iterations per thread
+
+    std::mt19937 rng(17);
+    std::uniform_real_distribution<float> dist(-3.0f, 3.0f);
+
+    std::vector<scalar_t> a_vals(rows * row_size);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals)->reshape({rows, row_size});
+    TensorPtr cpu_result = a_cpu->softmax(1);
+
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr gpu_result = a_gpu->softmax(1)->to(Device::CPU);
+
+    REQUIRE(gpu_result->shape() == cpu_result->shape());
+    for (size_t i = 0; i < rows; i++) {
+        scalar_t row_sum = 0.0f;
+        for (size_t j = 0; j < row_size; j++) {
+            CHECK(gpu_result->at({i, j}) == doctest::Approx(cpu_result->at({i, j})).epsilon(1e-3f));
+            row_sum += gpu_result->at({i, j});
+        }
+        CHECK(row_sum == doctest::Approx(1.0f).epsilon(1e-3f)); // each row must sum to 1
+    }
+}
+
+TEST_CASE("Tensor::softmax rank-3 on GPU-resident tensor matches CPU"){
+    const size_t L = 4, S = 6, V = 50; // e.g. [num_heads, seq_len, vocab]
+
+    std::mt19937 rng(23);
+    std::uniform_real_distribution<float> dist(-3.0f, 3.0f);
+
+    std::vector<scalar_t> a_vals(L * S * V);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals)->reshape({L, S, V});
+    TensorPtr cpu_result = a_cpu->softmax(2);
+
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr gpu_result = a_gpu->softmax(2)->to(Device::CPU);
+
+    REQUIRE(gpu_result->shape() == cpu_result->shape());
+    for (size_t l = 0; l < L; l++) {
+        for (size_t i = 0; i < S; i++) {
+            for (size_t j = 0; j < V; j++) {
+                CHECK(gpu_result->at({l, i, j}) == doctest::Approx(cpu_result->at({l, i, j})).epsilon(1e-3f));
+            }
+        }
+    }
+}
+
 TEST_CASE("Tensor::add/sub/mul throw on shape mismatch when CUDA-resident (no broadcasting yet)"){
     TensorPtr a_gpu = Tensor::create({4, 4})->to(Device::CUDA);
     TensorPtr b_gpu = Tensor::create({4, 1})->to(Device::CUDA); // would broadcast on CPU, not supported on CUDA yet
