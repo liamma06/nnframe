@@ -932,8 +932,20 @@ Tensor& Tensor::grad() { return *grad_; }
 
 void Tensor::backward(){
 
-    //inital gradient just 1 
-    grad_ = Tensor::create(shape_, 1.0f);
+    //inital gradient just 1
+    if (device_ == Device::CPU){
+        grad_ = Tensor::create(shape_, 1.0f);
+    }
+    #ifdef NNFRAME_WITH_CUDA
+    else if (device_ == Device::CUDA){
+        size_t n = numel();
+        std::vector<scalar_t> ones(n, 1.0f); 
+        scalar_t* d_grad = nullptr;
+        CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
+        CUDA_CHECK(cudaMemcpy(d_grad, ones.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+        grad_ = Tensor::from_device_ptr(d_grad, shape_, strides_);
+    }
+    #endif
 
     std::vector<Tensor*> order_list;
     std::unordered_set<Tensor*> visited; 

@@ -465,7 +465,12 @@ TEST_CASE("CUDA cross_entropy forward/backward match CPU CrossEntropy"){
     CUDA_CHECK(cudaMemcpy(&loss_cuda_val, d_loss, sizeof(scalar_t), cudaMemcpyDeviceToHost));
     CHECK(loss_cuda_val == doctest::Approx(loss_cpu->at({0})).epsilon(1e-3f));
 
-    cross_entropy_backward_cuda(d_logits, d_targets, d_grad_logits, rows, vocab_size, 1.0f);
+    scalar_t h_upstream = 1.0f;
+    scalar_t* d_upstream = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_upstream, sizeof(scalar_t)));
+    CUDA_CHECK(cudaMemcpy(d_upstream, &h_upstream, sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    cross_entropy_backward_cuda(d_logits, d_targets, d_grad_logits, rows, vocab_size, d_upstream);
 
     std::vector<scalar_t> grad_logits_cuda(h_logits.size());
     CUDA_CHECK(cudaMemcpy(grad_logits_cuda.data(), d_grad_logits, grad_logits_cuda.size() * sizeof(scalar_t), cudaMemcpyDeviceToHost));
@@ -480,6 +485,7 @@ TEST_CASE("CUDA cross_entropy forward/backward match CPU CrossEntropy"){
     CUDA_CHECK(cudaFree(d_targets));
     CUDA_CHECK(cudaFree(d_loss));
     CUDA_CHECK(cudaFree(d_grad_logits));
+    CUDA_CHECK(cudaFree(d_upstream));
 }
 
 TEST_CASE("CUDA layernorm matches scalar reference"){
@@ -540,4 +546,97 @@ TEST_CASE("CUDA layernorm matches scalar reference"){
     CUDA_CHECK(cudaFree(d_gamma));
     CUDA_CHECK(cudaFree(d_beta));
     CUDA_CHECK(cudaFree(d_out));
+}
+
+TEST_CASE("CUDA CrossEntropy real backward() matches CPU gradient"){
+    const size_t rows = 5, vocab_size = 12;
+
+    std::mt19937 rng(41);
+    std::uniform_real_distribution<float> val_dist(-2.0f, 2.0f);
+    std::uniform_int_distribution<int> target_dist(0, static_cast<int>(vocab_size) - 1);
+
+    std::vector<scalar_t> h_logits(rows * vocab_size);
+    for (auto& v : h_logits) v = val_dist(rng);
+
+    std::vector<scalar_t> h_targets(rows);
+    for (auto& v : h_targets) v = static_cast<scalar_t>(target_dist(rng));
+
+    // CPU reference
+    TensorPtr logits_cpu = Tensor::from_vector(h_logits)->reshape({rows, vocab_size});
+    logits_cpu->set_requires_grad(true);
+    TensorPtr targets_cpu = Tensor::from_vector(h_targets);
+
+    CrossEntropy ce_cpu;
+    TensorPtr loss_cpu = ce_cpu.forward(logits_cpu, targets_cpu);
+    loss_cpu->backward();
+
+    // GPU: through the real CrossEntropy class and real Tensor::backward(), exercising the grad_fn_ we just wired
+    TensorPtr logits_gpu = Tensor::from_vector(h_logits)->reshape({rows, vocab_size})->to(Device::CUDA);
+    logits_gpu->set_requires_grad(true);
+    TensorPtr targets_gpu = Tensor::from_vector(h_targets)->to(Device::CUDA);
+
+    CrossEntropy ce_gpu;
+    TensorPtr loss_gpu = ce_gpu.forward(logits_gpu, targets_gpu);
+    loss_gpu->backward();
+
+    TensorPtr loss_gpu_host = loss_gpu->to(Device::CPU);
+    CHECK(loss_gpu_host->at({0}) == doctest::Approx(loss_cpu->at({0})).epsilon(1e-3f));
+
+    TensorPtr grad_gpu_host = logits_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < rows; i++) {
+        for (size_t j = 0; j < vocab_size; j++) {
+            CHECK(grad_gpu_host->at({i, j}) == doctest::Approx(logits_cpu->grad().at({i, j})).epsilon(1e-3f));
+        }
+    }
+}
+
+TEST_CASE("CUDA embedding lookup backward via real Tensor::backward() matches scalar reference"){
+    // Embed the Layer class always builds its table on CPU with no way to move it,
+    // so this manually replicates embed.h's CUDA branch to exercise the real grad_fn_ wiring.
+    const size_t vocab_size = 10, embedding_dim = 8, seq_len = 6;
+
+    std::mt19937 rng(43);
+    std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> idx_dist(0, static_cast<int>(vocab_size) - 1);
+
+    std::vector<scalar_t> h_table(vocab_size * embedding_dim);
+    for (auto& v : h_table) v = val_dist(rng);
+
+    std::vector<scalar_t> h_indices(seq_len);
+    for (auto& v : h_indices) v = static_cast<scalar_t>(idx_dist(rng));
+
+    TensorPtr table_gpu = Tensor::from_vector(h_table)->reshape({vocab_size, embedding_dim})->to(Device::CUDA);
+    table_gpu->set_requires_grad(true);
+    TensorPtr indices_gpu = Tensor::from_vector(h_indices)->to(Device::CUDA);
+
+    scalar_t* d_out = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embedding_dim * sizeof(scalar_t)));
+    embed_cuda(table_gpu->device_data(), indices_gpu->device_data(), d_out, seq_len, embedding_dim);
+    TensorPtr output_gpu = Tensor::from_device_ptr(d_out, std::vector<size_t>{seq_len, embedding_dim}, std::vector<size_t>{embedding_dim, 1});
+
+    output_gpu->set_requires_grad(table_gpu->requires_grad());
+    output_gpu->set_inputs(std::vector<TensorPtr>{table_gpu});
+    output_gpu->set_grad_fn([table_gpu, indices_gpu, seq_len, embedding_dim](const Tensor& upstream){
+        if (table_gpu->requires_grad()){
+            table_gpu->init_grad();
+            embed_backward_cuda(indices_gpu->device_data(), upstream.device_data(), table_gpu->grad().mutable_device_data(), seq_len, embedding_dim);
+        }
+    });
+
+    output_gpu->backward(); // root grad defaults to all-ones, matching output_gpu's shape
+
+    TensorPtr grad_host = table_gpu->grad().to(Device::CPU);
+
+    // scalar reference: upstream is all-ones (matches backward()'s default root gradient), so this
+    // reduces to "how many times did each (token, dim) get touched" - still exercises the atomicAdd
+    // scatter for repeated tokens, just with 1.0 contributions instead of random ones.
+    std::vector<scalar_t> grad_table_scalar(h_table.size(), 0.0f);
+    for (size_t i = 0; i < seq_len; i++) {
+        size_t token = static_cast<size_t>(h_indices[i]);
+        for (size_t d = 0; d < embedding_dim; d++)
+            grad_table_scalar[token * embedding_dim + d] += 1.0f;
+    }
+
+    for (size_t i = 0; i < h_table.size(); i++)
+        CHECK(grad_host->data()[i] == doctest::Approx(grad_table_scalar[i]).epsilon(1e-4f));
 }
