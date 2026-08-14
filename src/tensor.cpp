@@ -1074,6 +1074,17 @@ TensorPtr Tensor::softmax(size_t dim) const{
             softmax_cuda(device_data_, d_out, rows, row_size);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self});
+            output_tensor->set_grad_fn([self, output_tensor, rows, row_size](const Tensor& upstream){
+                if (self->requires_grad_){
+                    self->init_grad();
+                    softmax_grad_cuda(upstream.device_data(), output_tensor->device_data(), self->grad().mutable_device_data(), rows, row_size);
+                }
+            });
+
             return output_tensor;
         }
     #endif

@@ -860,3 +860,50 @@ TEST_CASE("CUDA matmul rank-3 (batched) backward via real Tensor::backward() mat
             for (size_t j = 0; j < N; j++)
                 CHECK(b_grad_host->at({l, k, j}) == doctest::Approx(b_cpu->grad().at({l, k, j})).epsilon(1e-3f));
 }
+
+TEST_CASE("CUDA softmax rank-2 backward via real Tensor::backward() matches CPU"){
+    const size_t rows = 6, row_size = 20;
+
+    std::mt19937 rng(67);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> a_vals(rows * row_size);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals)->reshape({rows, row_size}); a_cpu->set_requires_grad(true);
+    TensorPtr c_cpu = a_cpu->softmax(1);
+    c_cpu->backward();
+
+    TensorPtr a_gpu = Tensor::from_vector(a_vals)->reshape({rows, row_size})->to(Device::CUDA); a_gpu->set_requires_grad(true);
+    TensorPtr c_gpu = a_gpu->softmax(1);
+    c_gpu->backward();
+
+    TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < rows; i++)
+        for (size_t j = 0; j < row_size; j++)
+            CHECK(a_grad_host->at({i, j}) == doctest::Approx(a_cpu->grad().at({i, j})).epsilon(1e-3f));
+}
+
+TEST_CASE("CUDA softmax rank-3 backward via real Tensor::backward() matches CPU"){
+    const size_t L = 3, S = 5, V = 15;
+
+    std::mt19937 rng(71);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> a_vals(L * S * V);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals)->reshape({L, S, V}); a_cpu->set_requires_grad(true);
+    TensorPtr c_cpu = a_cpu->softmax(2);
+    c_cpu->backward();
+
+    TensorPtr a_gpu = Tensor::from_vector(a_vals)->reshape({L, S, V})->to(Device::CUDA); a_gpu->set_requires_grad(true);
+    TensorPtr c_gpu = a_gpu->softmax(2);
+    c_gpu->backward();
+
+    TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+    for (size_t l = 0; l < L; l++)
+        for (size_t i = 0; i < S; i++)
+            for (size_t j = 0; j < V; j++)
+                CHECK(a_grad_host->at({l, i, j}) == doctest::Approx(a_cpu->grad().at({l, i, j})).epsilon(1e-3f));
+}
