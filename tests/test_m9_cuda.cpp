@@ -3,8 +3,10 @@
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
 #include "cuda/embed_cuda.cuh"
+#include "cuda/loss_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
+#include "loss/cross_entrop.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -421,4 +423,59 @@ TEST_CASE("CUDA embedding forward/backward match a scalar reference"){
     CUDA_CHECK(cudaFree(d_out));
     CUDA_CHECK(cudaFree(d_grad_out));
     CUDA_CHECK(cudaFree(d_grad_table));
+}
+
+TEST_CASE("CUDA cross_entropy forward/backward match CPU CrossEntropy"){
+    const size_t rows = 5, vocab_size = 12;
+
+    std::mt19937 rng(19);
+    std::uniform_real_distribution<float> val_dist(-2.0f, 2.0f);
+    std::uniform_int_distribution<int> target_dist(0, static_cast<int>(vocab_size) - 1);
+
+    std::vector<scalar_t> h_logits(rows * vocab_size);
+    for (auto& v : h_logits) v = val_dist(rng);
+
+    std::vector<scalar_t> h_targets(rows);
+    for (auto& v : h_targets) v = static_cast<scalar_t>(target_dist(rng));
+
+    // CPU reference: build a real graph so backward() chains through softmax/log/mean correctly
+    TensorPtr logits_cpu = Tensor::from_vector(h_logits)->reshape({rows, vocab_size});
+    logits_cpu->set_requires_grad(true);
+    TensorPtr targets_cpu = Tensor::from_vector(h_targets);
+
+    CrossEntropy ce;
+    TensorPtr loss_cpu = ce.forward(logits_cpu, targets_cpu);
+    loss_cpu->backward();
+
+    // CUDA path: raw kernel-level call, matching the loss value and the logits gradient
+    scalar_t *d_logits, *d_targets, *d_loss, *d_grad_logits;
+    CUDA_CHECK(cudaMalloc(&d_logits, h_logits.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_targets, h_targets.size() * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_loss, sizeof(scalar_t)));
+    CUDA_CHECK(cudaMalloc(&d_grad_logits, h_logits.size() * sizeof(scalar_t)));
+
+    CUDA_CHECK(cudaMemcpy(d_logits, h_logits.data(), h_logits.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_targets, h_targets.data(), h_targets.size() * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    cross_entropy_cuda(d_logits, d_targets, d_loss, rows, vocab_size);
+
+    scalar_t loss_cuda_val = 0.0f;
+    CUDA_CHECK(cudaMemcpy(&loss_cuda_val, d_loss, sizeof(scalar_t), cudaMemcpyDeviceToHost));
+    CHECK(loss_cuda_val == doctest::Approx(loss_cpu->at({0})).epsilon(1e-3f));
+
+    cross_entropy_backward_cuda(d_logits, d_targets, d_grad_logits, rows, vocab_size, 1.0f);
+
+    std::vector<scalar_t> grad_logits_cuda(h_logits.size());
+    CUDA_CHECK(cudaMemcpy(grad_logits_cuda.data(), d_grad_logits, grad_logits_cuda.size() * sizeof(scalar_t), cudaMemcpyDeviceToHost));
+
+    for (size_t i = 0; i < rows; i++) {
+        for (size_t j = 0; j < vocab_size; j++) {
+            CHECK(grad_logits_cuda[i * vocab_size + j] == doctest::Approx(logits_cpu->grad().at({i, j})).epsilon(1e-3f));
+        }
+    }
+
+    CUDA_CHECK(cudaFree(d_logits));
+    CUDA_CHECK(cudaFree(d_targets));
+    CUDA_CHECK(cudaFree(d_loss));
+    CUDA_CHECK(cudaFree(d_grad_logits));
 }
