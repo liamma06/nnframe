@@ -4,9 +4,25 @@
 #include "core/tensor.h"
 #include "modules/layer.h"
 
-class ReLu : public Layer{
+#ifdef NNFRAME_WITH_CUDA
+#include "cuda/elementwise_cuda.cuh"
+#endif
+
+class ReLu: public Layer{
     public:
     TensorPtr forward(const TensorPtr& input) override{
+        #ifdef NNFRAME_WITH_CUDA
+            if (input->device() == Device::CUDA){
+                size_t n = input->numel();
+                scalar_t* d_out = nullptr;
+                CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+
+                relu_cuda(input->device_data(), d_out, n);
+
+                return Tensor::from_device_ptr(d_out, input->shape(), input->strides());
+            }
+        #endif
+
         std::vector<size_t> new_input_shape = input->shape();
         auto output_tensor = Tensor::create(new_input_shape);
 

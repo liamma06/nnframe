@@ -2,6 +2,8 @@
 #include "doctest.h"
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
+#include "modules/relu.h"
+#include "modules/gelu.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -222,6 +224,35 @@ TEST_CASE("Tensor::softmax rank-3 on GPU-resident tensor matches CPU"){
                 CHECK(gpu_result->at({l, i, j}) == doctest::Approx(cpu_result->at({l, i, j})).epsilon(1e-3f));
             }
         }
+    }
+}
+
+TEST_CASE("Tensor::relu/gelu on GPU-resident tensors match CPU"){
+    const size_t n = 100;
+
+    std::mt19937 rng(31);
+    std::uniform_real_distribution<float> dist(-3.0f, 3.0f);
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals);
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+
+    SUBCASE("relu"){
+        ReLu relu;
+        TensorPtr cpu_result = relu.forward(a_cpu);
+        TensorPtr gpu_result = relu.forward(a_gpu)->to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
+    }
+
+    SUBCASE("gelu"){
+        GELU gelu;
+        TensorPtr cpu_result = gelu.forward(a_cpu);
+        TensorPtr gpu_result = gelu.forward(a_gpu)->to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
     }
 }
 

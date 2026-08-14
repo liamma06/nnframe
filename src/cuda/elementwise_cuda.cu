@@ -106,3 +106,33 @@ void scale_scalar_cuda(scalar_t* d_val, scalar_t factor) {
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+__global__ void relu_kernel(const scalar_t* in, scalar_t* out, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = in[i] > 0.0f ? in[i] : 0.0f;
+}
+
+void relu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    relu_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+__global__ void gelu_kernel(const scalar_t* in, scalar_t* out, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        scalar_t x = in[i];
+        scalar_t sig = 1.0f / (1.0f + expf(-1.702f * x));
+        out[i] = x * sig;
+    }
+}
+
+void gelu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    gelu_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}

@@ -8,3 +8,6 @@ void log_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n);
 
 void sum_reduce_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n);
 void scale_scalar_cuda(scalar_t* d_val, scalar_t factor);
+
+void relu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n);
+void gelu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n);

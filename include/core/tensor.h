@@ -94,6 +94,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         static TensorPtr create(std::vector<size_t> shape, scalar_t fill = 0.0f);
         static TensorPtr zeros(std::vector<size_t> shape);
         static TensorPtr from_vector(std::vector<scalar_t> data); // rank-1 tensor, shape inferred as {data.size()}
+        static TensorPtr from_device_ptr(scalar_t* d_ptr, std::vector<size_t> shape, std::vector<size_t> strides); // wraps an existing GPU buffer into a CUDA tensor
 
 
         //SIMD malmul call (cant pass tensor only scalar pointer)
@@ -116,6 +117,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         ~Tensor(); //destructor 
 
         Device device() const;
-        TensorPtr to(Device device) const; //new tensor on specified device. 
+        TensorPtr to(Device device) const; //new tensor on specified device.
+        const scalar_t* device_data() const; //raw GPU pointer
 
 };

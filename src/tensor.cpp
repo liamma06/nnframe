@@ -1133,6 +1133,17 @@ TensorPtr Tensor::log() const {
     return output_tensor;
 }
 
+TensorPtr Tensor::from_device_ptr(scalar_t* d_ptr, std::vector<size_t> shape, std::vector<size_t> strides) {
+    auto result = TensorPtr(new Tensor(nullptr, shape, strides, 0));
+    result->device_ = Device::CUDA;
+    result->device_data_ = d_ptr;
+    return result;
+}
+
+const scalar_t* Tensor::device_data() const {
+    return device_data_;
+}
+
 //DEVICE SEPARATION
 Tensor::Tensor(const Tensor& other){
     if(other.device_ == Device::CUDA){
