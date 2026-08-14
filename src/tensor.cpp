@@ -581,6 +581,22 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 }
 
 TensorPtr Tensor::mean() const{
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            size_t n = numel();
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, sizeof(scalar_t)));
+
+            sum_reduce_cuda(device_data_, d_out, n);
+            scale_scalar_cuda(d_out, 1.0f / static_cast<scalar_t>(n));
+
+            auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{1}, std::vector<size_t>{1}, 0));
+            output_tensor->device_ = Device::CUDA;
+            output_tensor->device_data_ = d_out;
+            return output_tensor;
+        }
+    #endif
+
     auto output_tensor = Tensor::create({1}); //one value
 
     // sum -> mean

@@ -136,6 +136,44 @@ TEST_CASE("Tensor::add/sub/mul throw on device mismatch"){
     CHECK_THROWS_AS(a_cpu->mul(b_gpu), std::runtime_error);
 }
 
+TEST_CASE("Tensor::log on GPU-resident tensor matches CPU"){
+    const size_t n = 100;
+
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<float> dist(0.1f, 2.0f); // positive only, log(negative) is NaN
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals);
+    TensorPtr cpu_result = a_cpu->log();
+
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr gpu_result = a_gpu->log()->to(Device::CPU);
+
+    for (size_t i = 0; i < n; i++)
+        CHECK(gpu_result->at({i}) == doctest::Approx(cpu_result->at({i})).epsilon(1e-4f));
+}
+
+TEST_CASE("Tensor::mean on GPU-resident tensor matches CPU (spans multiple reduction blocks)"){
+    const size_t n = 1000; // > 256, exercises multiple blocks + atomicAdd combination
+
+    std::mt19937 rng(9);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals);
+    TensorPtr cpu_result = a_cpu->mean();
+
+    TensorPtr a_gpu = a_cpu->to(Device::CUDA);
+    TensorPtr gpu_result = a_gpu->mean()->to(Device::CPU);
+
+    CHECK(gpu_result->shape() == cpu_result->shape());
+    CHECK(gpu_result->at({0}) == doctest::Approx(cpu_result->at({0})).epsilon(1e-3f));
+}
+
 TEST_CASE("Tensor::add/sub/mul throw on shape mismatch when CUDA-resident (no broadcasting yet)"){
     TensorPtr a_gpu = Tensor::create({4, 4})->to(Device::CUDA);
     TensorPtr b_gpu = Tensor::create({4, 1})->to(Device::CUDA); // would broadcast on CPU, not supported on CUDA yet
