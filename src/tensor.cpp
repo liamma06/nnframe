@@ -908,7 +908,25 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 bool Tensor::requires_grad() const { return requires_grad_; }
 void Tensor::set_requires_grad(bool val) { requires_grad_ = val; }
 void Tensor::set_grad_fn(std::function<void(const Tensor&)> gradfn) { grad_fn_ = gradfn; }
-void Tensor::init_grad() { if (!grad_) grad_ = Tensor::create(shape_); }
+
+void Tensor::init_grad() {
+    if (grad_) return;
+
+    if (device_ == Device::CPU){
+        grad_ = Tensor::create(shape_);
+    }
+    #ifdef NNFRAME_WITH_CUDA
+    else if (device_ == Device::CUDA){
+       size_t n = numel();
+       scalar_t* d_grad = nullptr;
+        CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
+        CUDA_CHECK(cudaMemset(d_grad, 0, n * sizeof(scalar_t)));
+
+        grad_ = Tensor::from_device_ptr(d_grad, shape_, strides_);
+    }
+    #endif
+}
+
 void Tensor::set_inputs(std::vector<TensorPtr> inputs) { inputs_ = inputs; }
 Tensor& Tensor::grad() { return *grad_; }
 
