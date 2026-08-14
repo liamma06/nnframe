@@ -19,7 +19,19 @@ class ReLu: public Layer{
 
                 relu_cuda(input->device_data(), d_out, n);
 
-                return Tensor::from_device_ptr(d_out, input->shape(), input->strides());
+                auto output_tensor = Tensor::from_device_ptr(d_out, input->shape(), input->strides());
+
+                auto self = std::const_pointer_cast<Tensor>(input->shared_from_this());
+                output_tensor->set_requires_grad(input->requires_grad());
+                output_tensor->set_inputs(std::vector<TensorPtr>{self});
+                output_tensor->set_grad_fn([self, n](const Tensor& upstream){
+                    if (self->requires_grad()){
+                        self->init_grad();
+                        relu_grad_cuda(upstream.device_data(), self->device_data(), self->grad().mutable_device_data(), n);
+                    }
+                });
+
+                return output_tensor;
             }
         #endif
 

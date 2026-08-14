@@ -640,3 +640,157 @@ TEST_CASE("CUDA embedding lookup backward via real Tensor::backward() matches sc
     for (size_t i = 0; i < h_table.size(); i++)
         CHECK(grad_host->data()[i] == doctest::Approx(grad_table_scalar[i]).epsilon(1e-4f));
 }
+
+TEST_CASE("CUDA add/sub/mul backward via real Tensor::backward() matches CPU"){
+    const size_t n = 50;
+
+    std::mt19937 rng(51);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> a_vals(n), b_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+    for (auto& v : b_vals) v = dist(rng);
+
+    SUBCASE("add"){
+        TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+        TensorPtr b_cpu = Tensor::from_vector(b_vals); b_cpu->set_requires_grad(true);
+        TensorPtr c_cpu = a_cpu->add(b_cpu);
+        c_cpu->backward();
+
+        TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+        TensorPtr b_gpu = Tensor::from_vector(b_vals)->to(Device::CUDA); b_gpu->set_requires_grad(true);
+        TensorPtr c_gpu = a_gpu->add(b_gpu);
+        c_gpu->backward();
+
+        TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+        TensorPtr b_grad_host = b_gpu->grad().to(Device::CPU);
+        for (size_t i = 0; i < n; i++){
+            CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+            CHECK(b_grad_host->at({i}) == doctest::Approx(b_cpu->grad().at({i})).epsilon(1e-4f));
+        }
+    }
+
+    SUBCASE("sub"){
+        TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+        TensorPtr b_cpu = Tensor::from_vector(b_vals); b_cpu->set_requires_grad(true);
+        TensorPtr c_cpu = a_cpu->sub(b_cpu);
+        c_cpu->backward();
+
+        TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+        TensorPtr b_gpu = Tensor::from_vector(b_vals)->to(Device::CUDA); b_gpu->set_requires_grad(true);
+        TensorPtr c_gpu = a_gpu->sub(b_gpu);
+        c_gpu->backward();
+
+        TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+        TensorPtr b_grad_host = b_gpu->grad().to(Device::CPU);
+        for (size_t i = 0; i < n; i++){
+            CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+            CHECK(b_grad_host->at({i}) == doctest::Approx(b_cpu->grad().at({i})).epsilon(1e-4f));
+        }
+    }
+
+    SUBCASE("mul"){
+        TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+        TensorPtr b_cpu = Tensor::from_vector(b_vals); b_cpu->set_requires_grad(true);
+        TensorPtr c_cpu = a_cpu->mul(b_cpu);
+        c_cpu->backward();
+
+        TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+        TensorPtr b_gpu = Tensor::from_vector(b_vals)->to(Device::CUDA); b_gpu->set_requires_grad(true);
+        TensorPtr c_gpu = a_gpu->mul(b_gpu);
+        c_gpu->backward();
+
+        TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+        TensorPtr b_grad_host = b_gpu->grad().to(Device::CPU);
+        for (size_t i = 0; i < n; i++){
+            CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+            CHECK(b_grad_host->at({i}) == doctest::Approx(b_cpu->grad().at({i})).epsilon(1e-4f));
+        }
+    }
+}
+
+TEST_CASE("CUDA log backward via real Tensor::backward() matches CPU"){
+    const size_t n = 50;
+
+    std::mt19937 rng(53);
+    std::uniform_real_distribution<float> dist(0.1f, 2.0f); // positive only
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+    TensorPtr c_cpu = a_cpu->log();
+    c_cpu->backward();
+
+    TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+    TensorPtr c_gpu = a_gpu->log();
+    c_gpu->backward();
+
+    TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < n; i++)
+        CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+}
+
+TEST_CASE("CUDA mean backward via real Tensor::backward() matches CPU"){
+    const size_t n = 1000; // spans multiple reduction blocks
+
+    std::mt19937 rng(57);
+    std::uniform_real_distribution<float> dist(-2.0f, 2.0f);
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+    TensorPtr c_cpu = a_cpu->mean();
+    c_cpu->backward();
+
+    TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+    TensorPtr c_gpu = a_gpu->mean();
+    c_gpu->backward();
+
+    TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < n; i++)
+        CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+}
+
+TEST_CASE("CUDA relu/gelu backward via real Tensor::backward() matches CPU"){
+    const size_t n = 50;
+
+    std::mt19937 rng(59);
+    std::uniform_real_distribution<float> dist(-3.0f, 3.0f);
+
+    std::vector<scalar_t> a_vals(n);
+    for (auto& v : a_vals) v = dist(rng);
+
+    SUBCASE("relu"){
+        TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+        ReLu relu_cpu;
+        TensorPtr c_cpu = relu_cpu.forward(a_cpu);
+        c_cpu->backward();
+
+        TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+        ReLu relu_gpu;
+        TensorPtr c_gpu = relu_gpu.forward(a_gpu);
+        c_gpu->backward();
+
+        TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+    }
+
+    SUBCASE("gelu"){
+        TensorPtr a_cpu = Tensor::from_vector(a_vals); a_cpu->set_requires_grad(true);
+        GELU gelu_cpu;
+        TensorPtr c_cpu = gelu_cpu.forward(a_cpu);
+        c_cpu->backward();
+
+        TensorPtr a_gpu = Tensor::from_vector(a_vals)->to(Device::CUDA); a_gpu->set_requires_grad(true);
+        GELU gelu_gpu;
+        TensorPtr c_gpu = gelu_gpu.forward(a_gpu);
+        c_gpu->backward();
+
+        TensorPtr a_grad_host = a_gpu->grad().to(Device::CPU);
+        for (size_t i = 0; i < n; i++)
+            CHECK(a_grad_host->at({i}) == doctest::Approx(a_cpu->grad().at({i})).epsilon(1e-4f));
+    }
+}

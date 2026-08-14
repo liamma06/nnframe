@@ -335,6 +335,18 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
             add_cuda(device_data_, other->device_data_, d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_ || other->requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self, other});
+            output_tensor->set_grad_fn([self, other, n](const Tensor& upstream){
+                if (self->requires_grad_ || other->requires_grad_){
+                    self->init_grad();
+                    other->init_grad();
+                    add_grad_cuda(upstream.device_data(), self->grad().mutable_device_data(), other->grad().mutable_device_data(), n);
+                }
+            });
+
             return output_tensor;
         }
     #endif
@@ -435,6 +447,18 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
             sub_cuda(device_data_, other->device_data_, d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_ || other->requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self, other});
+            output_tensor->set_grad_fn([self, other, n](const Tensor& upstream){
+                if (self->requires_grad_ || other->requires_grad_){
+                    self->init_grad();
+                    other->init_grad();
+                    sub_grad_cuda(upstream.device_data(), self->grad().mutable_device_data(), other->grad().mutable_device_data(), n);
+                }
+            });
+
             return output_tensor;
         }
     #endif
@@ -508,6 +532,18 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
             mul_cuda(device_data_, other->device_data_, d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_ || other->requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self, other});
+            output_tensor->set_grad_fn([self, other, n](const Tensor& upstream){
+                if (self->requires_grad_ || other->requires_grad_){
+                    self->init_grad();
+                    other->init_grad();
+                    mul_grad_cuda(upstream.device_data(), self->device_data(), other->device_data(), self->grad().mutable_device_data(), other->grad().mutable_device_data(), n);
+                }
+            });
+
             return output_tensor;
         }
     #endif
@@ -586,6 +622,17 @@ TensorPtr Tensor::mean() const{
             scale_scalar_cuda(d_out, 1.0f / static_cast<scalar_t>(n));
 
             auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{1}, std::vector<size_t>{1});
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self});
+            output_tensor->set_grad_fn([self, n](const Tensor& upstream){
+                if (self->requires_grad_){
+                    self->init_grad();
+                    mean_grad_cuda(upstream.device_data(), self->grad().mutable_device_data(), n);
+                }
+            });
+
             return output_tensor;
         }
     #endif
@@ -1122,6 +1169,17 @@ TensorPtr Tensor::log() const {
             log_cuda(device_data_, d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self});
+            output_tensor->set_grad_fn([self, n](const Tensor& upstream){
+                if (self->requires_grad_){
+                    self->init_grad();
+                    log_grad_cuda(upstream.device_data(), self->device_data(), self->grad().mutable_device_data(), n);
+                }
+            });
+
             return output_tensor;
         }
     #endif
