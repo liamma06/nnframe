@@ -334,9 +334,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
 
             add_cuda(device_data_, other->device_data_, d_out, n);
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
             return output_tensor;
         }
     #endif
@@ -436,9 +434,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 
             sub_cuda(device_data_, other->device_data_, d_out, n);
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
             return output_tensor;
         }
     #endif
@@ -511,9 +507,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 
             mul_cuda(device_data_, other->device_data_, d_out, n);
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
             return output_tensor;
         }
     #endif
@@ -591,9 +585,7 @@ TensorPtr Tensor::mean() const{
             sum_reduce_cuda(device_data_, d_out, n);
             scale_scalar_cuda(d_out, 1.0f / static_cast<scalar_t>(n));
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{1}, std::vector<size_t>{1}, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{1}, std::vector<size_t>{1});
             return output_tensor;
         }
     #endif
@@ -769,9 +761,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 matmul_cuda(device_data_, other->device_data_, d_out, M, K, N);
 
                 //new tensor on GPU
-                auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{M,N}, std::vector<size_t>{N,1}, 0));
-                output_tensor->device_ = Device::CUDA;
-                output_tensor->device_data_ = d_out;
+                auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{M,N}, std::vector<size_t>{N,1});
                 return output_tensor;
             }
             if (rank() == 3){
@@ -789,9 +779,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
                 matmul_batched(device_data_, other->device_data_, d_out, M, K, N, L);
 
-                auto output_tensor = TensorPtr(new Tensor(nullptr, std::vector<size_t>{L,M,N}, std::vector<size_t>{M*N,N,1}, 0));
-                output_tensor->device_ = Device::CUDA;
-                output_tensor->device_data_ = d_out;
+                auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{L,M,N}, std::vector<size_t>{M*N,N,1});
                 return output_tensor;
             }
         }
@@ -984,9 +972,7 @@ TensorPtr Tensor::softmax(size_t dim) const{
 
             softmax_cuda(device_data_, d_out, rows, row_size);
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
             return output_tensor;
         }
     #endif
@@ -1105,9 +1091,7 @@ TensorPtr Tensor::log() const {
 
             log_cuda(device_data_, d_out, n);
 
-            auto output_tensor = TensorPtr(new Tensor(nullptr, shape_, strides_, 0));
-            output_tensor->device_ = Device::CUDA;
-            output_tensor->device_data_ = d_out;
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
             return output_tensor;
         }
     #endif
@@ -1208,9 +1192,7 @@ TensorPtr Tensor::to(Device device) const{
             CUDA_CHECK(cudaMemcpy(d_ptr, src->data_->data(), bytes, cudaMemcpyHostToDevice));
 
             //new tensor with GPU pointer, same shape and strides
-            auto result = TensorPtr(new Tensor(nullptr, src->shape_, src->strides_, 0));
-            result->device_ = Device::CUDA;
-            result->device_data_ = d_ptr; //gpu address pointer
+            auto result = Tensor::from_device_ptr(d_ptr, src->shape_, src->strides_);
             return result;
 
         #else
