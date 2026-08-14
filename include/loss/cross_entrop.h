@@ -37,7 +37,19 @@ class CrossEntropy: public Loss{
 
                     cross_entropy_cuda(logits->device_data(), targets->device_data(), d_loss, seq_len, vocab_size);
 
-                    return Tensor::from_device_ptr(d_loss, std::vector<size_t>{1}, std::vector<size_t>{1});
+                    auto output_tensor = Tensor::from_device_ptr(d_loss, std::vector<size_t>{1}, std::vector<size_t>{1});
+
+                    auto self = std::const_pointer_cast<Tensor>(logits->shared_from_this());
+                    output_tensor->set_requires_grad(logits->requires_grad());
+                    output_tensor->set_inputs(std::vector<TensorPtr>{self});
+                    output_tensor->set_grad_fn([self, targets, seq_len, vocab_size](const Tensor& upstream){
+                        if (self->requires_grad()){
+                            self->init_grad();
+                            cross_entropy_backward_cuda(self->device_data(), targets->device_data(), self->grad().mutable_device_data(), seq_len, vocab_size, upstream.device_data());
+                        }
+                    });
+
+                    return output_tensor;
                 }
             #endif
 

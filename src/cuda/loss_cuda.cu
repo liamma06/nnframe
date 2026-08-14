@@ -36,7 +36,7 @@ void cross_entropy_cuda(const scalar_t* d_logits, const scalar_t* d_targets, sca
     CUDA_CHECK(cudaFree(d_row_loss));
 }
 
-__global__ void cross_entropy_backward_kernel(const scalar_t* probs, const scalar_t* targets, scalar_t* grad_logits, size_t rows, size_t vocab_size, scalar_t upstream) {
+__global__ void cross_entropy_backward_kernel(const scalar_t* probs, const scalar_t* targets, scalar_t* grad_logits, size_t rows, size_t vocab_size, const scalar_t* d_upstream) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     size_t total = rows * vocab_size;
 
@@ -46,11 +46,11 @@ __global__ void cross_entropy_backward_kernel(const scalar_t* probs, const scala
         size_t target = (size_t)targets[row];
 
         scalar_t one_hot = (cls == target) ? 1.0f : 0.0f;
-        grad_logits[idx] = (probs[idx] - one_hot) * upstream / static_cast<scalar_t>(rows);
+        grad_logits[idx] = (probs[idx] - one_hot) * (*d_upstream) / static_cast<scalar_t>(rows);
     }
 }
 
-void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_targets, scalar_t* d_grad_logits, size_t rows, size_t vocab_size, scalar_t upstream) {
+void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_targets, scalar_t* d_grad_logits, size_t rows, size_t vocab_size, const scalar_t* d_upstream) {
     scalar_t* d_probs = nullptr;
     CUDA_CHECK(cudaMalloc(&d_probs, rows * vocab_size * sizeof(scalar_t)));
     softmax_cuda(d_logits, d_probs, rows, vocab_size);
@@ -58,7 +58,7 @@ void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_tar
     size_t total = rows * vocab_size;
     size_t blockDim = 256;
     size_t gridDim = (total + blockDim - 1) / blockDim;
-    cross_entropy_backward_kernel<<<gridDim, blockDim>>>(d_probs, d_targets, d_grad_logits, rows, vocab_size, upstream);
+    cross_entropy_backward_kernel<<<gridDim, blockDim>>>(d_probs, d_targets, d_grad_logits, rows, vocab_size, d_upstream);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
