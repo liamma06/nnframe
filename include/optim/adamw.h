@@ -4,6 +4,10 @@
 #include <cmath>
 #include "core/tensor.h"
 
+#ifdef NNFRAME_WITH_CUDA
+    #include "cuda/optimizer_cuda.cuh"
+#endif
+
 //bru hthis so confusing 
 
 class AdamW{

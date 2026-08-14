@@ -1128,6 +1128,10 @@ const scalar_t* Tensor::device_data() const {
     return device_data_;
 }
 
+scalar_t* Tensor::mutable_device_data() {
+    return device_data_;
+}
+
 //DEVICE SEPARATION
 Tensor::Tensor(const Tensor& other){
     if(other.device_ == Device::CUDA){

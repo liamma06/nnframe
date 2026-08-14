@@ -119,5 +119,6 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         Device device() const;
         TensorPtr to(Device device) const; //new tensor on specified device.
         const scalar_t* device_data() const; //raw GPU pointer
+        scalar_t* mutable_device_data(); //raw GPU pointer
 
 };
