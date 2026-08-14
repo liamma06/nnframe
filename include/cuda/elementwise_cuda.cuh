@@ -19,3 +19,5 @@ void log_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, scal
 void relu_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, scalar_t* d_self_grad, size_t n);
 void gelu_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, scalar_t* d_self_grad, size_t n);
 void mean_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, size_t n);
+
+void accumulate_cuda(scalar_t* d_dst, const scalar_t* d_src, size_t n);

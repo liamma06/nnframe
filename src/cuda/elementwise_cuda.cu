@@ -245,3 +245,17 @@ void mean_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, size_t n)
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+//+= 
+__global__ void accumulate_kernel(scalar_t* dst, const scalar_t* src, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) dst[i] += src[i];
+}
+
+void accumulate_cuda(scalar_t* d_dst, const scalar_t* d_src, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    accumulate_kernel<<<gridDim, blockDim>>>(d_dst, d_src, n);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}

@@ -809,10 +809,22 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
 
                 //new tensor on GPU
                 auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{M,N}, std::vector<size_t>{N,1});
+
+                auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+                output_tensor->set_requires_grad(requires_grad_ || other->requires_grad_);
+                output_tensor->set_inputs(std::vector<TensorPtr>{self, other});
+                output_tensor->set_grad_fn([self, other, M, K, N](const Tensor& upstream){
+                    if (self->requires_grad_ || other->requires_grad_){
+                        self->init_grad();
+                        other->init_grad();
+                        matmul_grad_cuda(upstream.device_data(), self->device_data(), other->device_data(), self->grad().mutable_device_data(), other->grad().mutable_device_data(), M, K, N);
+                    }
+                });
+
                 return output_tensor;
             }
             if (rank() == 3){
-                
+
 
                 size_t L = shape_[0];
                 size_t M = shape_[1];
@@ -827,6 +839,18 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 matmul_batched(device_data_, other->device_data_, d_out, M, K, N, L);
 
                 auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{L,M,N}, std::vector<size_t>{M*N,N,1});
+
+                auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+                output_tensor->set_requires_grad(requires_grad_ || other->requires_grad_);
+                output_tensor->set_inputs(std::vector<TensorPtr>{self, other});
+                output_tensor->set_grad_fn([self, other, M, K, N, L](const Tensor& upstream){
+                    if (self->requires_grad_ || other->requires_grad_){
+                        self->init_grad();
+                        other->init_grad();
+                        matmul_grad_batched_cuda(upstream.device_data(), self->device_data(), other->device_data(), self->grad().mutable_device_data(), other->grad().mutable_device_data(), M, K, N, L);
+                    }
+                });
+
                 return output_tensor;
             }
         }
