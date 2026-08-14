@@ -85,6 +85,14 @@ class Embed: public Layer{
                 if (self->requires_grad()){
                     self->init_grad();
 
+                    #ifdef NNFRAME_WITH_CUDA
+                        if (self->device() == Device::CUDA){
+                            size_t seq_len = input->numel();
+                            embed_backward_cuda(input->device_data(), upstream.device_data(), self->grad().mutable_device_data(), seq_len, self->shape()[1]);
+                            return;
+                        }
+                    #endif
+
                     for (size_t i = 0; i < input->shape()[0]; i++){
                         size_t idx = static_cast<size_t>(input->at({i}));
                         for (size_t j = 0; j < self->shape()[1]; j++){
