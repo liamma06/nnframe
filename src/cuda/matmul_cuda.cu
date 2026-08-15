@@ -74,6 +74,27 @@ void matmul_batched(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, s
     CUDA_CHECK(cudaGetLastError());
 }
 
+__global__ void matmul_batched_accumulate_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N, size_t batch_size) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int batch = blockIdx.z;
+
+    if (row < M && col < N && batch < batch_size){
+        scalar_t sum = 0;
+        for (int i = 0; i < K; i++){
+            sum += a[batch * M * K + row * K + i ] * b[batch * K * N + i * N + col];
+        }
+        out[batch * M * N + row * N + col] += sum;
+    }
+}
+
+void matmul_batched_accumulate_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t M, size_t K, size_t N, size_t batch_size) {
+    dim3 blockDim(16,16);
+    dim3 gridDim((N + 15) / 16, (M + 15) / 16, batch_size);
+    matmul_batched_accumulate_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, M, K, N, batch_size);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 __global__ void transpose_kernel(const scalar_t* in, scalar_t* out, size_t rows, size_t cols) {
     // in is [rows, cols], out is [cols, rows], one thread per element
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -122,31 +143,23 @@ void matmul_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self, const 
         - d_upstream is [M, N], d_self is [M, K], d_other is [K, N]
         - d_self_grad += d_upstream @ d_other^T
         - d_other_grad += d_self^T @ d_upstream
-        - matmul_cuda overwrites its output -> product goes into a temp -> accumlate to grad
+        - matmul_accumulate_cuda writes the product straight into the grad buffer with +=, no temp needed
     */
     scalar_t* d_other_T = nullptr;
     CUDA_CHECK(cudaMalloc(&d_other_T, N * K * sizeof(scalar_t)));
     transpose_cuda(d_other, d_other_T, K, N);
 
-    scalar_t* temp1 = nullptr;
-    CUDA_CHECK(cudaMalloc(&temp1, M * K * sizeof(scalar_t)));
-    matmul_cuda(d_upstream, d_other_T, temp1, M, N, K);
-    accumulate_cuda(d_self_grad, temp1, M * K);
+    matmul_accumulate_cuda(d_upstream, d_other_T, d_self_grad, M, N, K);
 
     CUDA_CHECK(cudaFree(d_other_T));
-    CUDA_CHECK(cudaFree(temp1));
 
     scalar_t* d_self_T = nullptr;
     CUDA_CHECK(cudaMalloc(&d_self_T, K * M * sizeof(scalar_t)));
     transpose_cuda(d_self, d_self_T, M, K);
 
-    scalar_t* temp2 = nullptr;
-    CUDA_CHECK(cudaMalloc(&temp2, K * N * sizeof(scalar_t)));
-    matmul_cuda(d_self_T, d_upstream, temp2, K, M, N);
-    accumulate_cuda(d_other_grad, temp2, K * N);
+    matmul_accumulate_cuda(d_self_T, d_upstream, d_other_grad, K, M, N);
 
     CUDA_CHECK(cudaFree(d_self_T));
-    CUDA_CHECK(cudaFree(temp2));
 }
 
 void matmul_grad_batched_cuda(const scalar_t* d_upstream, const scalar_t* d_self, const scalar_t* d_other, scalar_t* d_self_grad, scalar_t* d_other_grad, size_t M, size_t K, size_t N, size_t batch_size) {
@@ -154,23 +167,37 @@ void matmul_grad_batched_cuda(const scalar_t* d_upstream, const scalar_t* d_self
     CUDA_CHECK(cudaMalloc(&d_other_T, batch_size * N * K * sizeof(scalar_t)));
     transpose_batched_cuda(d_other, d_other_T, K, N, batch_size);
 
-    scalar_t* temp1 = nullptr;
-    CUDA_CHECK(cudaMalloc(&temp1, batch_size * M * K * sizeof(scalar_t)));
-    matmul_batched(d_upstream, d_other_T, temp1, M, N, K, batch_size);
-    accumulate_cuda(d_self_grad, temp1, batch_size * M * K);
+    matmul_batched_accumulate_cuda(d_upstream, d_other_T, d_self_grad, M, N, K, batch_size);
 
     CUDA_CHECK(cudaFree(d_other_T));
-    CUDA_CHECK(cudaFree(temp1));
 
     scalar_t* d_self_T = nullptr;
     CUDA_CHECK(cudaMalloc(&d_self_T, batch_size * K * M * sizeof(scalar_t)));
     transpose_batched_cuda(d_self, d_self_T, M, K, batch_size);
 
-    scalar_t* temp2 = nullptr;
-    CUDA_CHECK(cudaMalloc(&temp2, batch_size * K * N * sizeof(scalar_t)));
-    matmul_batched(d_self_T, d_upstream, temp2, K, M, N, batch_size);
-    accumulate_cuda(d_other_grad, temp2, batch_size * K * N);
+    matmul_batched_accumulate_cuda(d_self_T, d_upstream, d_other_grad, K, M, N, batch_size);
 
     CUDA_CHECK(cudaFree(d_self_T));
-    CUDA_CHECK(cudaFree(temp2));
+}
+
+
+//fused accumlate kernel for backward pass of matmul 
+__global__ void matmul_accumulate_kernel(const scalar_t* a, const scalar_t* b, scalar_t* out, size_t M, size_t K, size_t N) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x; 
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (row < M && col < N){
+        scalar_t sum = 0;
+        for (int i = 0; i < K; i++){
+            sum += a[row * K + i ] * b[i * N + col];
+        }
+        out[row * N + col] += sum; 
+    }
+}
+
+void matmul_accumulate_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t M, size_t K, size_t N) {
+    dim3 blockDim(16,16); 
+    dim3 gridDim((N + 15) / 16, (M + 15) / 16);
+    matmul_accumulate_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, M, K, N);
+    CUDA_CHECK(cudaGetLastError());
 }
