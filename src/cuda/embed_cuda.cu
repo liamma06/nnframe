@@ -22,7 +22,6 @@ void embed_cuda(const scalar_t* d_table, const scalar_t* d_indices, scalar_t* d_
     size_t gridDim = (total + blockDim.x - 1) / blockDim.x;
     embed_kernel<<<gridDim, blockDim>>>(d_table, d_indices, d_out, seq_len, embedding_dim);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void embed_backward_kernel(const scalar_t* d_indices, const scalar_t* d_grad_out, scalar_t* d_grad_table, size_t seq_len, size_t embedding_dim){
@@ -48,5 +47,4 @@ void embed_backward_cuda(const scalar_t* d_indices, const scalar_t* d_grad_out, 
     size_t gridDim = (total + blockDim.x - 1) / blockDim.x;
     embed_backward_kernel<<<gridDim, blockDim>>>(d_indices, d_grad_out, d_grad_table, seq_len, embedding_dim);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }

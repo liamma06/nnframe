@@ -24,7 +24,6 @@ void add_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t 
     size_t gridDim = (n + blockDim - 1) / blockDim;
     add_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void sub_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t n) {
@@ -32,7 +31,6 @@ void sub_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t 
     size_t gridDim = (n + blockDim - 1) / blockDim;
     sub_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void mul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t n) {
@@ -40,7 +38,6 @@ void mul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size_t 
     size_t gridDim = (n + blockDim - 1) / blockDim;
     mul_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void log_kernel(const scalar_t* in, scalar_t* out, size_t n) {
@@ -53,7 +50,6 @@ void log_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
     size_t gridDim = (n + blockDim - 1) / blockDim;
     log_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void sum_reduce_kernel(const scalar_t* in, scalar_t* out, size_t n ){
@@ -94,7 +90,6 @@ void sum_reduce_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
     size_t gridDim = (n + blockDim - 1) / blockDim;
     sum_reduce_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void scale_scalar_kernel(scalar_t* val, scalar_t factor) {
@@ -104,7 +99,6 @@ __global__ void scale_scalar_kernel(scalar_t* val, scalar_t factor) {
 void scale_scalar_cuda(scalar_t* d_val, scalar_t factor) {
     scale_scalar_kernel<<<1, 1>>>(d_val, factor); // single value
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void relu_kernel(const scalar_t* in, scalar_t* out, size_t n) {
@@ -117,7 +111,6 @@ void relu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
     size_t gridDim = (n + blockDim - 1) / blockDim;
     relu_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void gelu_kernel(const scalar_t* in, scalar_t* out, size_t n) {
@@ -134,7 +127,6 @@ void gelu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
     size_t gridDim = (n + blockDim - 1) / blockDim;
     gelu_kernel<<<gridDim, blockDim>>>(d_in, d_out, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 /*
@@ -154,7 +146,6 @@ void add_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, scalar_t* 
     size_t gridDim = (n + blockDim - 1) / blockDim;
     add_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_grad, d_other_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void sub_grad_kernel(const scalar_t* upstream, scalar_t* self_grad, scalar_t* other_grad, size_t n) {
@@ -170,7 +161,6 @@ void sub_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, scalar_t* 
     size_t gridDim = (n + blockDim - 1) / blockDim;
     sub_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_grad, d_other_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void mul_grad_kernel(const scalar_t* upstream, const scalar_t* self_data, const scalar_t* other_data, scalar_t* self_grad, scalar_t* other_grad, size_t n) {
@@ -186,7 +176,6 @@ void mul_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, cons
     size_t gridDim = (n + blockDim - 1) / blockDim;
     mul_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_data, d_other_data, d_self_grad, d_other_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void log_grad_kernel(const scalar_t* upstream, const scalar_t* self_data, scalar_t* self_grad, size_t n) {
@@ -199,7 +188,6 @@ void log_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, scal
     size_t gridDim = (n + blockDim - 1) / blockDim;
     log_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_data, d_self_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void relu_grad_kernel(const scalar_t* upstream, const scalar_t* self_data, scalar_t* self_grad, size_t n) {
@@ -212,7 +200,6 @@ void relu_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, sca
     size_t gridDim = (n + blockDim - 1) / blockDim;
     relu_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_data, d_self_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void gelu_grad_kernel(const scalar_t* upstream, const scalar_t* self_data, scalar_t* self_grad, size_t n) {
@@ -230,7 +217,6 @@ void gelu_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self_data, sca
     size_t gridDim = (n + blockDim - 1) / blockDim;
     gelu_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_data, d_self_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void mean_grad_kernel(const scalar_t* upstream, scalar_t* self_grad, size_t n) {
@@ -243,7 +229,6 @@ void mean_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, size_t n)
     size_t gridDim = (n + blockDim - 1) / blockDim;
     mean_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_grad, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 //+= 
@@ -257,5 +242,4 @@ void accumulate_cuda(scalar_t* d_dst, const scalar_t* d_src, size_t n) {
     size_t gridDim = (n + blockDim - 1) / blockDim;
     accumulate_kernel<<<gridDim, blockDim>>>(d_dst, d_src, n);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }

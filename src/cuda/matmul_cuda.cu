@@ -45,7 +45,6 @@ void matmul_cuda(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, size
     dim3 gridDim((N + 15) / 16, (M + 15) / 16);
     matmul_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, M, K, N);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
     
 }
 
@@ -73,7 +72,6 @@ void matmul_batched(const scalar_t* d_a, const scalar_t* d_b, scalar_t* d_out, s
     dim3 gridDim((N + 15) / 16, (M + 15) / 16, batch_size);
     matmul_batched_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_out, M, K, N, batch_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void transpose_kernel(const scalar_t* in, scalar_t* out, size_t rows, size_t cols) {
@@ -94,7 +92,6 @@ void transpose_cuda(const scalar_t* d_in, scalar_t* d_out, size_t rows, size_t c
     size_t gridDim = (total + blockDim - 1) / blockDim;
     transpose_kernel<<<gridDim, blockDim>>>(d_in, d_out, rows, cols);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void transpose_batched_kernel(const scalar_t* in, scalar_t* out, size_t rows, size_t cols, size_t batch_size) {
@@ -118,7 +115,6 @@ void transpose_batched_cuda(const scalar_t* d_in, scalar_t* d_out, size_t rows, 
     size_t gridDim = (total + blockDim - 1) / blockDim;
     transpose_batched_kernel<<<gridDim, blockDim>>>(d_in, d_out, rows, cols, batch_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void matmul_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self, const scalar_t* d_other, scalar_t* d_self_grad, scalar_t* d_other_grad, size_t M, size_t K, size_t N) {

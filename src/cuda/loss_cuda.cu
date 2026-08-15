@@ -27,7 +27,6 @@ void cross_entropy_cuda(const scalar_t* d_logits, const scalar_t* d_targets, sca
     size_t gridDim = (rows + blockDim - 1) / blockDim;
     nll_gather_kernel<<<gridDim, blockDim>>>(d_probs, d_targets, d_row_loss, rows, vocab_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 
     sum_reduce_cuda(d_row_loss, d_loss, rows);
     scale_scalar_cuda(d_loss, 1.0f / static_cast<scalar_t>(rows));
@@ -60,7 +59,6 @@ void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_tar
     size_t gridDim = (total + blockDim - 1) / blockDim;
     cross_entropy_backward_kernel<<<gridDim, blockDim>>>(d_probs, d_targets, d_grad_logits, rows, vocab_size, d_upstream);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaFree(d_probs));
 }

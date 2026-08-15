@@ -65,7 +65,6 @@ void layernorm_cuda(const scalar_t* d_input, const scalar_t* d_gamma, const scal
     dim3 grid(rows);
     layernorm_kernel<<<grid, block>>>(d_input, d_gamma, d_beta, d_output, rows, cols, eps);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void layernorm_grad_kernel(const scalar_t* upstream, const scalar_t* input, const scalar_t* gamma,
@@ -160,5 +159,4 @@ void layernorm_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_input, co
     dim3 grid(rows);
     layernorm_grad_kernel<<<grid, block>>>(d_upstream, d_input, d_gamma, d_input_grad, d_gamma_grad, d_beta_grad, rows, cols, eps);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }

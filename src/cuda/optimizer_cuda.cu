@@ -30,7 +30,6 @@ void adamw_cuda(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar
     size_t gridDim = (param_size + blockDim.x - 1) / blockDim.x;
     adamw_kernel<<<gridDim, blockDim>>>(d_param, d_grad, d_m, d_v, param_size, lr, beta1, beta2, eps, weight_decay, bias_correction1, bias_correction2);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize()); 
 
 }
 
@@ -63,7 +62,6 @@ void sum_of_squares_cuda(const scalar_t* d_input, scalar_t* d_output, size_t inp
     size_t gridDim = (input_size + blockDim.x - 1) / blockDim.x;
     sum_of_squares_kernel<<<gridDim, blockDim>>>(d_input, d_output, input_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void grad_clip_kernel(scalar_t* d_grad, const scalar_t* d_sum_sq, size_t n, scalar_t max_norm) {
@@ -87,7 +85,6 @@ void grad_clip_cuda(scalar_t* d_grad, const scalar_t* d_sum_sq, size_t n, scalar
     size_t gridDim = (n + blockDim.x - 1) / blockDim.x;
     grad_clip_kernel<<<gridDim, blockDim>>>(d_grad, d_sum_sq, n, max_norm);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 void clip_grad_norm_cuda(std::vector<scalar_t*> d_grads, std::vector<size_t> sizes, scalar_t max_norm) {
@@ -102,14 +99,12 @@ void clip_grad_norm_cuda(std::vector<scalar_t*> d_grads, std::vector<size_t> siz
         sum_of_squares_kernel<<<gridDim, blockDim>>>(d_grads[i], d_sum_sq, sizes[i]);
     }
     CUDA_CHECK(cudaGetLastError());
-CUDA_CHECK(cudaDeviceSynchronize()); 
 
     for (size_t i = 0; i < d_grads.size(); i++) {
         size_t gridDim = (sizes[i] + blockDim.x - 1) / blockDim.x;
         grad_clip_kernel<<<gridDim, blockDim>>>(d_grads[i], d_sum_sq, sizes[i], max_norm);
     }
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 
     CUDA_CHECK(cudaFree(d_sum_sq));
 }

@@ -68,7 +68,6 @@ void softmax_cuda(const scalar_t* d_in, scalar_t* d_out, size_t rows, size_t row
     size_t gridDim = rows; // one block per row
     softmax_kernel<<<gridDim, blockDim>>>(d_in, d_out, rows, row_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void softmax_grad_kernel(const scalar_t* upstream, const scalar_t* output, scalar_t* grad, size_t rows, size_t row_size) {
@@ -113,5 +112,4 @@ void softmax_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_output, sca
     size_t gridDim = rows;
     softmax_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_output, d_grad, rows, row_size);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
