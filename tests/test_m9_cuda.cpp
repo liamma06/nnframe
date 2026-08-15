@@ -9,6 +9,7 @@
 #include "modules/gelu.h"
 #include "modules/layernorm.h"
 #include "loss/cross_entrop.h"
+#include "optim/adamw.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -969,4 +970,62 @@ TEST_CASE("CUDA LayerNorm backward via real Tensor::backward() matches CPU"){
         CHECK(gamma_grad_host->at({j}) == doctest::Approx(gamma_grad_cpu->at({j})).epsilon(1e-3f));
         CHECK(beta_grad_host->at({j}) == doctest::Approx(beta_grad_cpu->at({j})).epsilon(1e-3f));
     }
+}
+
+TEST_CASE("CUDA AdamW step matches CPU AdamW step, over multiple steps"){
+    const size_t n = 20;
+
+    std::mt19937 rng(79);
+    std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
+
+    std::vector<scalar_t> param_vals(n), grad_vals_1(n), grad_vals_2(n);
+    for (auto& v : param_vals) v = val_dist(rng);
+    for (auto& v : grad_vals_1) v = val_dist(rng);
+    for (auto& v : grad_vals_2) v = val_dist(rng);
+
+    // CPU reference
+    TensorPtr param_cpu = Tensor::from_vector(param_vals);
+    param_cpu->set_requires_grad(true);
+    param_cpu->init_grad();
+    for (size_t i = 0; i < n; i++) param_cpu->grad().mutable_data()[i] = grad_vals_1[i];
+
+    AdamW opt_cpu({param_cpu}, 0.01f);
+    opt_cpu.step(); // t=1, exercises bias correction at t=1
+
+    for (size_t i = 0; i < n; i++) param_cpu->grad().mutable_data()[i] = grad_vals_2[i];
+    opt_cpu.step(); // t=2, exercises the momentum recurrence (m_/v_ carrying over from t=1)
+
+    // GPU
+    TensorPtr param_gpu = Tensor::from_vector(param_vals)->to(Device::CUDA);
+    param_gpu->set_requires_grad(true);
+    param_gpu->init_grad();
+    CUDA_CHECK(cudaMemcpy(param_gpu->grad().mutable_device_data(), grad_vals_1.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    AdamW opt_gpu({param_gpu}, 0.01f);
+    opt_gpu.step();
+
+    CUDA_CHECK(cudaMemcpy(param_gpu->grad().mutable_device_data(), grad_vals_2.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    opt_gpu.step();
+
+    TensorPtr param_gpu_host = param_gpu->to(Device::CPU);
+    for (size_t i = 0; i < n; i++)
+        CHECK(param_gpu_host->at({i}) == doctest::Approx(param_cpu->at({i})).epsilon(1e-3f));
+}
+
+TEST_CASE("CUDA AdamW zero_grad zeroes a CUDA-resident gradient"){
+    const size_t n = 10;
+
+    TensorPtr param_gpu = Tensor::create({n}, 0.0f)->to(Device::CUDA);
+    param_gpu->set_requires_grad(true);
+    param_gpu->init_grad();
+
+    std::vector<scalar_t> ones(n, 1.0f);
+    CUDA_CHECK(cudaMemcpy(param_gpu->grad().mutable_device_data(), ones.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    AdamW opt_gpu({param_gpu}, 0.01f);
+    opt_gpu.zero_grad();
+
+    TensorPtr grad_host = param_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < n; i++)
+        CHECK(grad_host->at({i}) == doctest::Approx(0.0f));
 }

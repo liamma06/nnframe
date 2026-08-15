@@ -21,6 +21,11 @@ class AdamW{
 
         std::vector<std::vector<scalar_t>> m_; //first moment
         std::vector<std::vector<scalar_t>> v_; //second moment
+
+        //CUDA 
+        std::vector<scalar_t*> d_m_;
+        std::vector<scalar_t*> d_v_;
+
         size_t t_; //time step
     
     public:
@@ -28,41 +33,89 @@ class AdamW{
             : params_(params), lr_(lr), beta1_(beta1), beta2_(beta2), epsilon_(epsilon), weight_decay_(weight_decay), t_(0) {
             m_.resize(params.size());
             v_.resize(params.size());
+            d_m_.resize(params.size());
+            d_v_.resize(params.size());
+
             for (size_t i = 0; i < params.size(); ++i) {
-                m_[i].resize(params[i]->numel(), 0.0f);
-                v_[i].resize(params[i]->numel(), 0.0f);
+                if(params[i]->device() == Device::CPU){
+                    m_[i].resize(params[i]->numel(), 0.0f);
+                    v_[i].resize(params[i]->numel(), 0.0f);
+                }
+
+                #ifdef NNFRAME_WITH_CUDA
+                    else if(params[i]->device() == Device::CUDA){
+                        size_t n = params[i]->numel();
+                        CUDA_CHECK(cudaMalloc(&d_m_[i], n * sizeof(scalar_t)));
+                        CUDA_CHECK(cudaMalloc(&d_v_[i], n * sizeof(scalar_t)));
+                        CUDA_CHECK(cudaMemset(d_m_[i], 0, n * sizeof(scalar_t)));
+                        CUDA_CHECK(cudaMemset(d_v_[i], 0, n * sizeof(scalar_t)));
+                    }
+                #endif
+
+
             }
+        }
+
+        ~AdamW(){
+            #ifdef NNFRAME_WITH_CUDA
+                for (size_t i = 0; i < params_.size(); ++i) {
+                    if(params_[i]->device() == Device::CUDA){
+                        CUDA_CHECK(cudaFree(d_m_[i]));
+                        CUDA_CHECK(cudaFree(d_v_[i]));
+                    }
+                }
+            #endif
         }
 
         void step() {
             t_++;
+            scalar_t bias_correction1 = 1.0f - std::pow(beta1_, static_cast<scalar_t>(t_));
+            scalar_t bias_correction2 = 1.0f - std::pow(beta2_, static_cast<scalar_t>(t_));
+
             for (size_t i = 0; i < params_.size(); ++i) {
-                if (params_[i]->requires_grad()) {
-                    auto& param_data = params_[i]->mutable_data();
-                    auto& param_grad = params_[i]->grad().mutable_data();
-                    for (size_t j = 0; j < param_data.size(); ++j) {
-                        // Update biased first moment estimate
-                        m_[i][j] = beta1_ * m_[i][j] + (1 - beta1_) * param_grad[j];
-                        // Update biased second first moment estimate
-                        v_[i][j] = beta2_ * v_[i][j] + (1 - beta2_) * (param_grad[j] * param_grad[j]);
-                        // Compute bias correct first moment estimate
-                        scalar_t m_hat = m_[i][j] / (1 - std::pow(beta1_, t_));
-                        // Compute bias correct second first moment estimate
-                        scalar_t v_hat = v_[i][j] / (1 - std::pow(beta2_, t_));
-                        // Update parameters ->  decay
-                        param_data[j] -= lr_ * (m_hat / (std::sqrt(v_hat) + epsilon_) + weight_decay_ * param_data[j]);
+                if (!params_[i]->requires_grad()) continue;
+
+                #ifdef NNFRAME_WITH_CUDA
+                    if (params_[i]->device() == Device::CUDA) {
+                        adamw_cuda(params_[i]->mutable_device_data(), params_[i]->grad().device_data(),
+                                    d_m_[i], d_v_[i], params_[i]->numel(),
+                                   lr_, beta1_, beta2_, epsilon_, weight_decay_, bias_correction1, bias_correction2);
+                        continue;
                     }
+                #endif
+
+                auto& param_data = params_[i]->mutable_data();
+                auto& param_grad = params_[i]->grad().mutable_data();
+                for (size_t j = 0; j < param_data.size(); ++j) {
+                    // Update biased first moment estimate
+                    m_[i][j] = beta1_ * m_[i][j] + (1 - beta1_) * param_grad[j];
+                    // Update biased second first moment estimate
+                    v_[i][j] = beta2_ * v_[i][j] + (1 - beta2_) * (param_grad[j] * param_grad[j]);
+                    // Compute bias correct first moment estimate
+                    scalar_t m_hat = m_[i][j] / bias_correction1;
+                    // Compute bias correct second first moment estimate
+                    scalar_t v_hat = v_[i][j] / bias_correction2;
+                    // Update parameters ->  decay
+                    param_data[j] -= lr_ * (m_hat / (std::sqrt(v_hat) + epsilon_) + weight_decay_ * param_data[j]);
                 }
             }
         }
 
         void zero_grad() {
             for (auto& param : params_) {
-                if (param->requires_grad()) {
-                    param->init_grad();
-                    for (size_t i = 0; i < param->numel(); i++) {
-                        param->grad().mutable_data()[i] = 0.0f;
+                if (!param->requires_grad()) continue;
+
+                param->init_grad();
+
+                #ifdef NNFRAME_WITH_CUDA
+                    if (param->device() == Device::CUDA) {
+                        CUDA_CHECK(cudaMemset(param->grad().mutable_device_data(), 0, param->numel() * sizeof(scalar_t)));
+                        continue;
                     }
+                #endif
+
+                for (size_t i = 0; i < param->numel(); i++) {
+                    param->grad().mutable_data()[i] = 0.0f;
                 }
             }
         };
