@@ -10,6 +10,7 @@
 #include "modules/layernorm.h"
 #include "loss/cross_entrop.h"
 #include "optim/adamw.h"
+#include "optim/grad_clip.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -1028,4 +1029,43 @@ TEST_CASE("CUDA AdamW zero_grad zeroes a CUDA-resident gradient"){
     TensorPtr grad_host = param_gpu->grad().to(Device::CPU);
     for (size_t i = 0; i < n; i++)
         CHECK(grad_host->at({i}) == doctest::Approx(0.0f));
+}
+
+TEST_CASE("CUDA clip_grad_norm matches CPU clip_grad_norm across multiple params") {
+    const size_t n1 = 5, n2 = 7;
+    scalar_t max_norm = 1.0f;
+
+    std::vector<scalar_t> grad1_vals = {3.0f, -1.0f, 2.0f, 0.5f, -4.0f};
+    std::vector<scalar_t> grad2_vals = {1.0f, -2.0f, 3.0f, -0.5f, 2.5f, -1.5f, 0.25f};
+
+    // CPU reference
+    TensorPtr p1_cpu = Tensor::create({n1}, 0.0f);
+    TensorPtr p2_cpu = Tensor::create({n2}, 0.0f);
+    p1_cpu->set_requires_grad(true);
+    p2_cpu->set_requires_grad(true);
+    p1_cpu->init_grad();
+    p2_cpu->init_grad();
+    for (size_t i = 0; i < n1; i++) p1_cpu->grad().mutable_data()[i] = grad1_vals[i];
+    for (size_t i = 0; i < n2; i++) p2_cpu->grad().mutable_data()[i] = grad2_vals[i];
+
+    clip_grad_norm({p1_cpu, p2_cpu}, max_norm);
+
+    // CUDA
+    TensorPtr p1_gpu = Tensor::create({n1}, 0.0f)->to(Device::CUDA);
+    TensorPtr p2_gpu = Tensor::create({n2}, 0.0f)->to(Device::CUDA);
+    p1_gpu->set_requires_grad(true);
+    p2_gpu->set_requires_grad(true);
+    p1_gpu->init_grad();
+    p2_gpu->init_grad();
+    CUDA_CHECK(cudaMemcpy(p1_gpu->grad().mutable_device_data(), grad1_vals.data(), n1 * sizeof(scalar_t), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(p2_gpu->grad().mutable_device_data(), grad2_vals.data(), n2 * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    clip_grad_norm({p1_gpu, p2_gpu}, max_norm);
+
+    TensorPtr g1_host = p1_gpu->grad().to(Device::CPU);
+    TensorPtr g2_host = p2_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < n1; i++)
+        CHECK(g1_host->at({i}) == doctest::Approx(p1_cpu->grad().at({i})).epsilon(1e-4f));
+    for (size_t i = 0; i < n2; i++)
+        CHECK(g2_host->at({i}) == doctest::Approx(p2_cpu->grad().at({i})).epsilon(1e-4f));
 }
