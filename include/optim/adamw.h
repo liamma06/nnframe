@@ -23,9 +23,13 @@ class AdamW{
         std::vector<std::vector<scalar_t>> m_; //first moment
         std::vector<std::vector<scalar_t>> v_; //second moment
 
-        //CUDA 
+        //CUDA
         std::vector<scalar_t*> d_m_;
         std::vector<scalar_t*> d_v_;
+
+        #ifdef NNFRAME_WITH_CUDA
+            scalar_t* d_sum_sq_ = nullptr; 
+        #endif
 
         size_t t_; //time step
     
@@ -55,6 +59,15 @@ class AdamW{
 
 
             }
+
+            #ifdef NNFRAME_WITH_CUDA
+                for (size_t i = 0; i < params.size(); ++i) {
+                    if (params[i]->device() == Device::CUDA) {
+                        CUDA_CHECK(cudaMalloc(&d_sum_sq_, sizeof(scalar_t)));
+                        break;
+                    }
+                }
+            #endif
         }
 
         ~AdamW(){
@@ -65,6 +78,7 @@ class AdamW{
                         CUDA_CHECK(cudaFree(d_v_[i]));
                     }
                 }
+                if (d_sum_sq_) CUDA_CHECK(cudaFree(d_sum_sq_));
             #endif
         }
 
@@ -109,19 +123,12 @@ class AdamW{
             scalar_t bias_correction2 = 1.0f - std::pow(beta2_, static_cast<scalar_t>(t_));
 
             #ifdef NNFRAME_WITH_CUDA
-                scalar_t* d_sum_sq = nullptr;
-                bool has_cuda_params = false;
-                for (auto& param : params_) {
-                    if (param->requires_grad() && param->device() == Device::CUDA) { has_cuda_params = true; break; }
-                }
-
-                if (has_cuda_params) {
-                    CUDA_CHECK(cudaMalloc(&d_sum_sq, sizeof(scalar_t)));
-                    CUDA_CHECK(cudaMemset(d_sum_sq, 0, sizeof(scalar_t)));
+                if (d_sum_sq_) {
+                    CUDA_CHECK(cudaMemset(d_sum_sq_, 0, sizeof(scalar_t)));
 
                     for (auto& param : params_) {
                         if (param->requires_grad() && param->device() == Device::CUDA) {
-                            sum_of_squares_accumulate_cuda(param->grad().device_data(), d_sum_sq, param->numel());
+                            sum_of_squares_accumulate_cuda(param->grad().device_data(), d_sum_sq_, param->numel());
                         }
                     }
                 }
@@ -142,7 +149,7 @@ class AdamW{
                         adamw_clipped_cuda(params_[i]->mutable_device_data(), params_[i]->grad().device_data(),
                                     d_m_[i], d_v_[i], params_[i]->numel(),
                                    lr_, beta1_, beta2_, epsilon_, weight_decay_, bias_correction1, bias_correction2,
-                                   d_sum_sq, max_norm);
+                                   d_sum_sq_, max_norm);
                         continue;
                     }
                 #endif
@@ -157,10 +164,6 @@ class AdamW{
                     param_data[j] -= lr_ * (m_hat / (std::sqrt(v_hat) + epsilon_) + weight_decay_ * param_data[j]);
                 }
             }
-
-            #ifdef NNFRAME_WITH_CUDA
-                if (has_cuda_params) CUDA_CHECK(cudaFree(d_sum_sq));
-            #endif
         }
 
         void zero_grad() {

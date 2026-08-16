@@ -105,4 +105,7 @@ if(NNFRAME_WITH_CUDA)
 
     add_executable(bias_gelu_cuda_benchmark examples/bias_gelu_cuda_benchmark.cpp)
     target_link_libraries(bias_gelu_cuda_benchmark PRIVATE nnframe_core_cuda)
+
+    add_executable(adamw_clip_cuda_benchmark examples/adamw_clip_cuda_benchmark.cpp)
+    target_link_libraries(adamw_clip_cuda_benchmark PRIVATE nnframe_core_cuda)
 endif()
