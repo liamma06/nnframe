@@ -76,11 +76,11 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     TensorPtr K_reshaped = K->reshape({input->shape()[0],num_heads_,  head_dim_});
     TensorPtr V_reshaped = V->reshape({input->shape()[0],num_heads_, head_dim_});
 
-    TensorPtr Q_head = Q_reshaped->permute({1, 0, 2});
+    TensorPtr Q_head = Q_reshaped->permute({1, 0, 2})->contiguous();
     TensorPtr K_head = K_reshaped->permute({1, 0, 2});
-    TensorPtr V_head = V_reshaped->permute({1, 0,2}); 
+    TensorPtr V_head = V_reshaped->permute({1, 0,2})->contiguous();
 
-    TensorPtr K_transposed = K_head->permute({0, 2, 1}); //transpose last 2 dims for matmul
+    TensorPtr K_transposed = K_head->permute({0, 2, 1})->contiguous(); //transpose last 2 dims for matmul
     TensorPtr raw_scores = Q_head->matmul(K_transposed);
     scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim_));
 
@@ -207,10 +207,10 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
     TensorPtr full_V = kv_cache.get_v();
 
 
-    TensorPtr Q_split = Q->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
+    TensorPtr Q_split = Q->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2})->contiguous();
 
     //scores against all K in cache !
-    TensorPtr K_transposed = full_K->permute({0, 2, 1});
+    TensorPtr K_transposed = full_K->permute({0, 2, 1})->contiguous();
     TensorPtr raw_scores = Q_split->matmul(K_transposed);
     scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim_));
 

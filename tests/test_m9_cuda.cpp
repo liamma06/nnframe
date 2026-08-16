@@ -1206,11 +1206,11 @@ TEST_CASE("CUDA SelfAttention forward+backward (score scaling + causal mask) mat
     TensorPtr K = input_gpu->matmul(Wk_gpu);
     TensorPtr V = input_gpu->matmul(Wv_gpu);
 
-    TensorPtr Q_head = Q->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
+    TensorPtr Q_head = Q->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2})->contiguous();
     TensorPtr K_head = K->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
-    TensorPtr V_head = V->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
+    TensorPtr V_head = V->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2})->contiguous();
 
-    TensorPtr K_transposed = K_head->permute({0, 2, 1});
+    TensorPtr K_transposed = K_head->permute({0, 2, 1})->contiguous();
     TensorPtr raw_scores = Q_head->matmul(K_transposed);
     scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
 

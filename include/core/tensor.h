@@ -27,7 +27,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
 
         size_t compute_strides();
 
-        Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset); // takes in data ptr so no need to recopy/buffer
+        Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device = Device::CPU, scalar_t* device_data = nullptr); // takes in data ptr
 
         //device separation
         Device device_ = Device::CPU; 

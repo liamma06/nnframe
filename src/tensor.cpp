@@ -45,11 +45,13 @@ Tensor::Tensor(std::vector<size_t> shape, std::vector<scalar_t> data){
     data_ = std::make_shared<std::vector<scalar_t>>(data); //direct input data
 }
 
-Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset) {
+Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device, scalar_t* device_data) {
     data_ = data;
     shape_ = shape;
     strides_ = strides;
     offset_ = offset;
+    device_ = device;
+    device_data_ = device_data;
 }
 
 //factory methods 
@@ -172,7 +174,7 @@ TensorPtr Tensor::reshape(std::vector<size_t> new_shape) const {
         stride *= new_shape[i];
     }
 
-    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_, device_, device_data_));
 
     /*
         Why need autograd here?
@@ -186,6 +188,12 @@ TensorPtr Tensor::reshape(std::vector<size_t> new_shape) const {
         result->set_grad_fn([self](const Tensor& upstream){
             if (self->requires_grad()){
                 self->init_grad();
+                #ifdef NNFRAME_WITH_CUDA
+                    if (self->device() == Device::CUDA){
+                        accumulate_cuda(self->grad().mutable_device_data(), upstream.device_data(), self->numel());
+                        return;
+                    }
+                #endif
                 for (size_t i = 0; i < self->numel(); i++){
                     self->grad().mutable_data()[i] += upstream.data()[i];
                 }
@@ -218,7 +226,7 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
         new_strides[i] = strides_[axes[i]];
     }
 
-    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_));
+    auto result = TensorPtr(new Tensor(data_, new_shape, new_strides, offset_, device_, device_data_));
 
     if (requires_grad_){
         result->set_requires_grad(true);
@@ -228,10 +236,22 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
             if (self->requires_grad()){
                 self->init_grad();
 
+                #ifdef NNFRAME_WITH_CUDA
+                    if (self->device() == Device::CUDA){
+                        assert(self->rank() == 3 && "CUDA permute backward currently only supports rank 3");
+                        permute_grad_cuda(upstream.device_data(), self->grad().mutable_device_data(),
+                                            self->shape()[0], self->shape()[1], self->shape()[2],
+                                            axes[0], axes[1], axes[2],
+                                            upstream.strides()[0], upstream.strides()[1], upstream.strides()[2],
+                                            upstream.offset_, self->numel());
+                        return;
+                    }
+                #endif
+
                 /*
                     We need to map upstream grad into the new tensor
                     but we switched the axes so we need to permute the indices back to the original tensor's order
-                    and add them into the correct spots 
+                    and add them into the correct spots
                 */
                 for (size_t i = 0; i < self->numel(); i++){
                     std::vector<size_t> self_idx(self->rank());
@@ -256,6 +276,45 @@ TensorPtr Tensor::permute(std::vector<size_t> axes) const{
 }
 
 TensorPtr Tensor::contiguous() const {
+    #ifdef NNFRAME_WITH_CUDA
+        if (device_ == Device::CUDA){
+            size_t n = numel();
+            size_t r = rank();
+
+            std::vector<size_t> padded_shape = {1, 1, 1};
+            std::vector<size_t> padded_stride = {0, 0, 0};
+            for (size_t i = 0; i < r; i++){
+                padded_shape[3 - r + i] = shape_[i];
+                padded_stride[3 - r + i] = strides_[i];
+            }
+
+            std::vector<size_t> out_strides(r);
+            size_t acc = 1;
+            for (int i = static_cast<int>(r) - 1; i >= 0; i--){
+                out_strides[i] = acc;
+                acc *= shape_[i];
+            }
+
+            scalar_t* d_out = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            contiguous_cuda(device_data_, d_out, padded_shape[0], padded_shape[1], padded_shape[2], padded_stride[0], padded_stride[1], padded_stride[2], offset_, n);
+
+            auto output_tensor = Tensor::from_device_ptr(d_out, shape_, out_strides);
+
+            auto self = std::const_pointer_cast<Tensor>(shared_from_this());
+            output_tensor->set_requires_grad(requires_grad_);
+            output_tensor->set_inputs(std::vector<TensorPtr>{self});
+            output_tensor->set_grad_fn([self, n](const Tensor& upstream){
+                if (self->requires_grad_){
+                    self->init_grad();
+                    accumulate_cuda(self->grad().mutable_device_data(), upstream.device_data(), n);
+                }
+            });
+
+            return output_tensor;
+        }
+    #endif
+
     // copies data into a new contiguous tensor
     // permute ( i, j ) while reshape -> straight through, so just copy (index based) back
     auto result = Tensor::create(shape_);
@@ -993,7 +1052,14 @@ void Tensor::init_grad() {
         CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
         CUDA_CHECK(cudaMemset(d_grad, 0, n * sizeof(scalar_t)));
 
-        grad_ = Tensor::from_device_ptr(d_grad, shape_, strides_);
+        std::vector<size_t> standard_strides(shape_.size());
+        size_t stride = 1;
+        for (int i = static_cast<int>(shape_.size()) - 1; i >= 0; i--){
+            standard_strides[i] = stride;
+            stride *= shape_[i];
+        }
+
+        grad_ = Tensor::from_device_ptr(d_grad, shape_, standard_strides);
     }
     #endif
 }
@@ -1010,11 +1076,18 @@ void Tensor::backward(){
     #ifdef NNFRAME_WITH_CUDA
     else if (device_ == Device::CUDA){
         size_t n = numel();
-        std::vector<scalar_t> ones(n, 1.0f); 
+        std::vector<scalar_t> ones(n, 1.0f);
         scalar_t* d_grad = nullptr;
         CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
         CUDA_CHECK(cudaMemcpy(d_grad, ones.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
-        grad_ = Tensor::from_device_ptr(d_grad, shape_, strides_);
+        std::vector<size_t> standard_strides(shape_.size());
+        size_t stride = 1;
+        for (int i = static_cast<int>(shape_.size()) - 1; i >= 0; i--){
+            standard_strides[i] = stride;
+            stride *= shape_[i];
+        }
+
+        grad_ = Tensor::from_device_ptr(d_grad, shape_, standard_strides);
     }
     #endif
 

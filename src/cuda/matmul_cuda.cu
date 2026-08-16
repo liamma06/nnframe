@@ -115,6 +115,65 @@ void transpose_cuda(const scalar_t* d_in, scalar_t* d_out, size_t rows, size_t c
     CUDA_CHECK(cudaGetLastError());
 }
 
+/*
+    contiguous(): rank<=3 strided gather (forward) / scatter (backward).
+*/
+__global__ void contiguous_kernel(const scalar_t* in, scalar_t* out,
+                                    size_t shape0, size_t shape1, size_t shape2,
+                                    size_t stride0, size_t stride1, size_t stride2,
+                                    size_t offset, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        size_t remaining = i;
+        size_t idx2 = remaining % shape2; remaining /= shape2;
+        size_t idx1 = remaining % shape1; remaining /= shape1;
+        size_t idx0 = remaining;
+
+        size_t pos = offset + idx0 * stride0 + idx1 * stride1 + idx2 * stride2;
+        out[i] = in[pos];
+    }
+}
+
+void contiguous_cuda(const scalar_t* d_in, scalar_t* d_out, size_t shape0, size_t shape1, size_t shape2, size_t stride0, size_t stride1, size_t stride2, size_t offset, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    contiguous_kernel<<<gridDim, blockDim>>>(d_in, d_out, shape0, shape1, shape2, stride0, stride1, stride2, offset, n);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+/*
+    backward for permute(axes): self_grad[i] += upstream[out_idx]
+*/
+__global__ void permute_grad_kernel(const scalar_t* upstream, scalar_t* self_grad,
+                                     size_t shape0, size_t shape1, size_t shape2,
+                                     size_t axis0, size_t axis1, size_t axis2,
+                                     size_t up_stride0, size_t up_stride1, size_t up_stride2,
+                                     size_t up_offset, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        size_t remaining = i;
+        size_t self_idx2 = remaining % shape2; remaining /= shape2;
+        size_t self_idx1 = remaining % shape1; remaining /= shape1;
+        size_t self_idx0 = remaining;
+        size_t self_idx[3] = {self_idx0, self_idx1, self_idx2};
+
+        size_t axes_arr[3] = {axis0, axis1, axis2};
+        size_t up_strides[3] = {up_stride0, up_stride1, up_stride2};
+
+        size_t pos = up_offset;
+        for (size_t j = 0; j < 3; j++) pos += self_idx[axes_arr[j]] * up_strides[j];
+
+        self_grad[i] += upstream[pos];
+    }
+}
+
+void permute_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, size_t shape0, size_t shape1, size_t shape2, size_t axis0, size_t axis1, size_t axis2, size_t up_stride0, size_t up_stride1, size_t up_stride2, size_t up_offset, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    permute_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_grad, shape0, shape1, shape2, axis0, axis1, axis2, up_stride0, up_stride1, up_stride2, up_offset, n);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 __global__ void transpose_batched_kernel(const scalar_t* in, scalar_t* out, size_t rows, size_t cols, size_t batch_size) {
     // each batch's [rows, cols] slice is transposed separate
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
