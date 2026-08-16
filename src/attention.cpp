@@ -2,7 +2,9 @@
 #include <random>
 #include <limits>
 
-
+#ifdef NNFRAME_WITH_CUDA
+    #include "cuda/attention_cuda.cuh"
+#endif
 
 SelfAttention::SelfAttention(size_t embed_dim, size_t num_heads){
     std::mt19937 rng(42);
@@ -80,35 +82,66 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     TensorPtr K_transposed = K_head->permute({0, 2, 1}); //transpose last 2 dims for matmul
     TensorPtr scores = Q_head->matmul(K_transposed)->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
 
+    TensorPtr masked_scores;
 
-    //mask looping through each head and each token and setting to -inf if after
-    auto masked_scores = Tensor::create(scores->shape());
-    for (size_t i = 0; i < scores->shape()[0]; i++){
-        for (size_t j = 0; j < scores->shape()[1]; j++){
-            for (size_t k = 0; k < scores->shape()[2]; k++){
-                if (k <= j)
-                    masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
-                else
-                    masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+    #ifdef NNFRAME_WITH_CUDA
+        if (scores->device() == Device::CUDA){
+            scalar_t* d_out = nullptr;
+
+            size_t heads = scores->shape()[0];
+            size_t seq_len_q = scores->shape()[1];
+            size_t seq_len_k = scores->shape()[2];
+
+            CUDA_CHECK(cudaMalloc(&d_out, scores->numel() * sizeof(scalar_t)));
+            causal_mask_cuda(scores->device_data(), d_out, heads, seq_len_q, seq_len_k);
+            masked_scores = Tensor::from_device_ptr(d_out, scores->shape(), scores->strides());
+        
+
+            masked_scores->set_inputs({scores});
+            masked_scores->set_requires_grad(scores->requires_grad());
+            masked_scores->set_grad_fn([scores](const Tensor& upstream){
+                if (scores->requires_grad()){
+                    size_t heads = scores->shape()[0];
+                    size_t seq_len_q = scores->shape()[1];
+                    size_t seq_len_k = scores->shape()[2];
+
+                    scores->init_grad();
+                    causal_mask_grad_cuda(upstream.device_data(), scores->grad().mutable_device_data(), heads, seq_len_q, seq_len_k);
+                }
+            });
+        }   
+    #endif 
+    
+    if (scores->device() == Device::CPU){
+        //mask looping through each head and each token and setting to -inf if after
+        masked_scores = Tensor::create(scores->shape());
+        for (size_t i = 0; i < scores->shape()[0]; i++){
+            for (size_t j = 0; j < scores->shape()[1]; j++){
+                for (size_t k = 0; k < scores->shape()[2]; k++){
+                    if (k <= j)
+                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
+                    else
+                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+                }
             }
         }
-    }
 
-    masked_scores->set_inputs({scores});
-    masked_scores->set_requires_grad(scores->requires_grad());
-    masked_scores->set_grad_fn([scores](const Tensor& upstream){
-        if (scores->requires_grad()){
-            scores->init_grad();
-                for (size_t i = 0; i < scores->shape()[0]; i++){
-                    for (size_t j = 0; j < scores->shape()[1]; j++){
-                        for (size_t k = 0; k < scores->shape()[2]; k++){
-                            if (k <= j)
-                                scores->grad().mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] += upstream.at({i,j,k});
+        masked_scores->set_inputs({scores});
+        masked_scores->set_requires_grad(scores->requires_grad());
+        masked_scores->set_grad_fn([scores](const Tensor& upstream){
+            if (scores->requires_grad()){
+                scores->init_grad();
+                    for (size_t i = 0; i < scores->shape()[0]; i++){
+                        for (size_t j = 0; j < scores->shape()[1]; j++){
+                            for (size_t k = 0; k < scores->shape()[2]; k++){
+                                if (k <= j)
+                                    scores->grad().mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] += upstream.at({i,j,k});
+                            }
                         }
                     }
-                }
-        }
-    });
+            }
+        });
+    }
 
     TensorPtr attention_weights = masked_scores->softmax(2);
     TensorPtr attention_output = attention_weights->matmul(V_head);
@@ -160,16 +193,34 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
             - but in decode it the newest token so no future ones 
     */
 
-    auto masked_scores = Tensor::create(scores->shape());
+    TensorPtr masked_scores;
 
     if (input->shape()[0] > 1){ // more than one token [seq_len, embded_dim]
-        for (size_t i = 0; i < scores->shape()[0]; i++){
-            for (size_t j = 0; j < scores->shape()[1]; j++){
-                for (size_t k = 0; k < scores->shape()[2]; k++){
-                    if (k <= j)
-                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
-                    else
-                        masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+
+        #ifdef NNFRAME_WITH_CUDA
+            if (scores->device() == Device::CUDA){
+                scalar_t* d_out = nullptr;
+
+                size_t heads = scores->shape()[0];
+                size_t seq_len_q = scores->shape()[1];
+                size_t seq_len_k = scores->shape()[2];
+
+                CUDA_CHECK(cudaMalloc(&d_out, scores->numel() * sizeof(scalar_t)));
+                causal_mask_cuda(scores->device_data(), d_out, heads, seq_len_q, seq_len_k);
+                masked_scores = Tensor::from_device_ptr(d_out, scores->shape(), scores->strides());
+            }
+        #endif
+
+        if (scores->device() == Device::CPU){
+            masked_scores = Tensor::create(scores->shape());
+            for (size_t i = 0; i < scores->shape()[0]; i++){
+                for (size_t j = 0; j < scores->shape()[1]; j++){
+                    for (size_t k = 0; k < scores->shape()[2]; k++){
+                        if (k <= j)
+                            masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = scores->at({i,j,k});
+                        else
+                            masked_scores->mutable_data()[i * scores->shape()[1] * scores->shape()[2] + j * scores->shape()[2] + k] = -std::numeric_limits<scalar_t>::infinity();
+                    }
                 }
             }
         }
