@@ -4,6 +4,7 @@
 
 #ifdef NNFRAME_WITH_CUDA
     #include "cuda/attention_cuda.cuh"
+    #include "cuda/elementwise_cuda.cuh"
 #endif
 
 SelfAttention::SelfAttention(size_t embed_dim, size_t num_heads){
@@ -80,7 +81,32 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     TensorPtr V_head = V_reshaped->permute({1, 0,2}); 
 
     TensorPtr K_transposed = K_head->permute({0, 2, 1}); //transpose last 2 dims for matmul
-    TensorPtr scores = Q_head->matmul(K_transposed)->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
+    TensorPtr raw_scores = Q_head->matmul(K_transposed);
+    scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim_));
+
+    TensorPtr scores;
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (raw_scores->device() == Device::CUDA){
+            scalar_t* d_scaled = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_scaled, raw_scores->numel() * sizeof(scalar_t)));
+            scale_tensor_cuda(raw_scores->device_data(), d_scaled, score_scale, raw_scores->numel());
+            scores = Tensor::from_device_ptr(d_scaled, raw_scores->shape(), raw_scores->strides());
+
+            scores->set_inputs({raw_scores});
+            scores->set_requires_grad(raw_scores->requires_grad());
+            scores->set_grad_fn([raw_scores, score_scale](const Tensor& upstream){
+                if (raw_scores->requires_grad()){
+                    raw_scores->init_grad();
+                    scale_tensor_grad_cuda(upstream.device_data(), raw_scores->grad().mutable_device_data(), score_scale, raw_scores->numel());
+                }
+            });
+        }
+    #endif
+
+    if (raw_scores->device() == Device::CPU){
+        scores = raw_scores->mul(Tensor::create({1}, score_scale));
+    }
 
     TensorPtr masked_scores;
 
@@ -183,9 +209,25 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
 
     TensorPtr Q_split = Q->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
 
-    //scores against all K in cache ! 
+    //scores against all K in cache !
     TensorPtr K_transposed = full_K->permute({0, 2, 1});
-    TensorPtr scores = Q_split->matmul(K_transposed)->mul(Tensor::create({1}, 1.0f / std::sqrt(static_cast<float>(head_dim_))));
+    TensorPtr raw_scores = Q_split->matmul(K_transposed);
+    scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim_));
+
+    TensorPtr scores;
+
+    #ifdef NNFRAME_WITH_CUDA
+        if (raw_scores->device() == Device::CUDA){
+            scalar_t* d_scaled = nullptr;
+            CUDA_CHECK(cudaMalloc(&d_scaled, raw_scores->numel() * sizeof(scalar_t)));
+            scale_tensor_cuda(raw_scores->device_data(), d_scaled, score_scale, raw_scores->numel());
+            scores = Tensor::from_device_ptr(d_scaled, raw_scores->shape(), raw_scores->strides());
+        }
+    #endif
+
+    if (raw_scores->device() == Device::CPU){
+        scores = raw_scores->mul(Tensor::create({1}, score_scale));
+    }
 
     /*
         maksing is a lil different cause in prefil:

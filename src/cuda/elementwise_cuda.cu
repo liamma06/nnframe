@@ -129,6 +129,18 @@ void gelu_cuda(const scalar_t* d_in, scalar_t* d_out, size_t n) {
     CUDA_CHECK(cudaGetLastError());
 }
 
+__global__ void scale_tensor_kernel(const scalar_t* in, scalar_t* out, scalar_t factor, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) out[i] = in[i] * factor;
+}
+
+void scale_tensor_cuda(const scalar_t* d_in, scalar_t* d_out, scalar_t factor, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    scale_tensor_kernel<<<gridDim, blockDim>>>(d_in, d_out, factor, n);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 /*
     backward kernels -> same one-thread-per-element shape as forward
 */
@@ -231,7 +243,19 @@ void mean_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, size_t n)
     CUDA_CHECK(cudaGetLastError());
 }
 
-//+= 
+__global__ void scale_tensor_grad_kernel(const scalar_t* upstream, scalar_t* self_grad, scalar_t factor, size_t n) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) self_grad[i] += upstream[i] * factor;
+}
+
+void scale_tensor_grad_cuda(const scalar_t* d_upstream, scalar_t* d_self_grad, scalar_t factor, size_t n) {
+    size_t blockDim = 256;
+    size_t gridDim = (n + blockDim - 1) / blockDim;
+    scale_tensor_grad_kernel<<<gridDim, blockDim>>>(d_upstream, d_self_grad, factor, n);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+//+=
 __global__ void accumulate_kernel(scalar_t* dst, const scalar_t* src, size_t n) {
     size_t i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < n) dst[i] += src[i];

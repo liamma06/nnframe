@@ -5,10 +5,12 @@
 #include "cuda/embed_cuda.cuh"
 #include "cuda/loss_cuda.cuh"
 #include "cuda/layernorm_cuda.cuh"
+#include "cuda/attention_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
 #include "modules/linear_gelu.h"
 #include "modules/layernorm.h"
+#include "modules/attention.h"
 #include "loss/cross_entrop.h"
 #include "optim/adamw.h"
 #include "optim/grad_clip.h"
@@ -1173,4 +1175,94 @@ TEST_CASE("CUDA AdamW fused step(max_norm) matches CPU step(max_norm), and match
         CHECK(param_gpu_fused_host->at({i}) == doctest::Approx(param_cpu->at({i})).epsilon(1e-3f));
         CHECK(param_gpu_fused_host->at({i}) == doctest::Approx(param_gpu_unfused_host->at({i})).epsilon(1e-4f));
     }
+}
+
+TEST_CASE("CUDA SelfAttention forward+backward (score scaling + causal mask) matches CPU") {
+    // SelfAttention can't move its weights to CUDA via a public API, so this manually
+    // replicates forward()'s CUDA branch here, reusing the exact same CPU-initialized
+    // weights (moved to CUDA) so both paths start from identical parameters.
+    const size_t seq_len = 4, embed_dim = 8, num_heads = 2, head_dim = embed_dim / num_heads;
+
+    SelfAttention layer_cpu(embed_dim, num_heads);
+    TensorPtr input_cpu = Tensor::create({seq_len, embed_dim});
+    input_cpu->set_requires_grad(true);
+    std::mt19937 rng(13);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (size_t i = 0; i < input_cpu->numel(); i++) input_cpu->mutable_data()[i] = dist(rng);
+
+    TensorPtr output_cpu = layer_cpu.forward(input_cpu);
+    output_cpu->backward();
+
+    std::vector<TensorPtr> params = layer_cpu.parameters(); // W_q, W_k, W_v, W_o
+    TensorPtr Wq_gpu = params[0]->to(Device::CUDA); Wq_gpu->set_requires_grad(true);
+    TensorPtr Wk_gpu = params[1]->to(Device::CUDA); Wk_gpu->set_requires_grad(true);
+    TensorPtr Wv_gpu = params[2]->to(Device::CUDA); Wv_gpu->set_requires_grad(true);
+    TensorPtr Wo_gpu = params[3]->to(Device::CUDA); Wo_gpu->set_requires_grad(true);
+
+    TensorPtr input_gpu = input_cpu->to(Device::CUDA);
+    input_gpu->set_requires_grad(true);
+
+    TensorPtr Q = input_gpu->matmul(Wq_gpu);
+    TensorPtr K = input_gpu->matmul(Wk_gpu);
+    TensorPtr V = input_gpu->matmul(Wv_gpu);
+
+    TensorPtr Q_head = Q->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
+    TensorPtr K_head = K->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
+    TensorPtr V_head = V->reshape({seq_len, num_heads, head_dim})->permute({1, 0, 2});
+
+    TensorPtr K_transposed = K_head->permute({0, 2, 1});
+    TensorPtr raw_scores = Q_head->matmul(K_transposed);
+    scalar_t score_scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+    // scale (replicates attention.cpp's CUDA scaling branch)
+    scalar_t* d_scaled = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_scaled, raw_scores->numel() * sizeof(scalar_t)));
+    scale_tensor_cuda(raw_scores->device_data(), d_scaled, score_scale, raw_scores->numel());
+    TensorPtr scores = Tensor::from_device_ptr(d_scaled, raw_scores->shape(), raw_scores->strides());
+    scores->set_inputs({raw_scores});
+    scores->set_requires_grad(raw_scores->requires_grad());
+    scores->set_grad_fn([raw_scores, score_scale](const Tensor& upstream){
+        if (raw_scores->requires_grad()){
+            raw_scores->init_grad();
+            scale_tensor_grad_cuda(upstream.device_data(), raw_scores->grad().mutable_device_data(), score_scale, raw_scores->numel());
+        }
+    });
+
+    // causal mask (replicates attention.cpp's CUDA masking branch)
+    size_t heads = scores->shape()[0], sq = scores->shape()[1], sk = scores->shape()[2];
+    scalar_t* d_masked = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_masked, scores->numel() * sizeof(scalar_t)));
+    causal_mask_cuda(scores->device_data(), d_masked, heads, sq, sk);
+    TensorPtr masked_scores = Tensor::from_device_ptr(d_masked, scores->shape(), scores->strides());
+    masked_scores->set_inputs({scores});
+    masked_scores->set_requires_grad(scores->requires_grad());
+    masked_scores->set_grad_fn([scores, heads, sq, sk](const Tensor& upstream){
+        if (scores->requires_grad()){
+            scores->init_grad();
+            causal_mask_grad_cuda(upstream.device_data(), scores->grad().mutable_device_data(), heads, sq, sk);
+        }
+    });
+
+    TensorPtr attention_weights = masked_scores->softmax(2);
+    TensorPtr attention_output = attention_weights->matmul(V_head);
+    TensorPtr attention_output_reshaped = attention_output->permute({1, 0, 2})->contiguous()->reshape({seq_len, embed_dim});
+    TensorPtr output_gpu = attention_output_reshaped->matmul(Wo_gpu);
+
+    output_gpu->backward();
+
+    TensorPtr output_gpu_host = output_gpu->to(Device::CPU);
+    for (size_t i = 0; i < seq_len; i++)
+        for (size_t j = 0; j < embed_dim; j++)
+            CHECK(output_gpu_host->at({i, j}) == doctest::Approx(output_cpu->at({i, j})).epsilon(1e-3f));
+
+    TensorPtr input_grad_host = input_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < seq_len; i++)
+        for (size_t j = 0; j < embed_dim; j++)
+            CHECK(input_grad_host->at({i, j}) == doctest::Approx(input_cpu->grad().at({i, j})).epsilon(1e-3f));
+
+    std::vector<TensorPtr> gpu_weight_grads = {Wq_gpu->grad().to(Device::CPU), Wk_gpu->grad().to(Device::CPU), Wv_gpu->grad().to(Device::CPU), Wo_gpu->grad().to(Device::CPU)};
+    for (size_t p = 0; p < params.size(); p++)
+        for (size_t i = 0; i < embed_dim; i++)
+            for (size_t j = 0; j < embed_dim; j++)
+                CHECK(gpu_weight_grads[p]->at({i, j}) == doctest::Approx(params[p]->grad().at({i, j})).epsilon(1e-3f));
 }
