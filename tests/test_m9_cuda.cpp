@@ -1126,3 +1126,51 @@ TEST_CASE("CUDA LinearGELU (fused bias+GELU) matches CPU LinearGELU forward and 
     for (size_t i = 0; i < params[1]->numel(); i++)
         CHECK(bias_grad_host->at({i}) == doctest::Approx(params[1]->grad().at({i})).epsilon(1e-3f));
 }
+
+TEST_CASE("CUDA AdamW fused step(max_norm) matches CPU step(max_norm), and matches the unfused clip-then-step path") {
+    const size_t n = 20;
+    const scalar_t max_norm = 1.0f; // deliberately small so clipping actually kicks in
+
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> grad_dist(-10.0f, 10.0f); // large so ||grad|| > max_norm
+
+    std::vector<scalar_t> param_vals(n), grad_vals(n);
+    for (auto& v : param_vals) v = val_dist(rng);
+    for (auto& v : grad_vals) v = grad_dist(rng);
+
+    // CPU, fused step(max_norm)
+    TensorPtr param_cpu = Tensor::from_vector(param_vals);
+    param_cpu->set_requires_grad(true);
+    param_cpu->init_grad();
+    for (size_t i = 0; i < n; i++) param_cpu->grad().mutable_data()[i] = grad_vals[i];
+
+    AdamW opt_cpu({param_cpu}, 0.01f);
+    opt_cpu.step(max_norm);
+
+    // CUDA, fused step(max_norm)
+    TensorPtr param_gpu_fused = Tensor::from_vector(param_vals)->to(Device::CUDA);
+    param_gpu_fused->set_requires_grad(true);
+    param_gpu_fused->init_grad();
+    CUDA_CHECK(cudaMemcpy(param_gpu_fused->grad().mutable_device_data(), grad_vals.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    AdamW opt_gpu_fused({param_gpu_fused}, 0.01f);
+    opt_gpu_fused.step(max_norm);
+
+    // CUDA, old unfused path: clip_grad_norm_cuda first, then plain step()
+    TensorPtr param_gpu_unfused = Tensor::from_vector(param_vals)->to(Device::CUDA);
+    param_gpu_unfused->set_requires_grad(true);
+    param_gpu_unfused->init_grad();
+    CUDA_CHECK(cudaMemcpy(param_gpu_unfused->grad().mutable_device_data(), grad_vals.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
+
+    clip_grad_norm({param_gpu_unfused}, max_norm);
+    AdamW opt_gpu_unfused({param_gpu_unfused}, 0.01f);
+    opt_gpu_unfused.step();
+
+    TensorPtr param_gpu_fused_host = param_gpu_fused->to(Device::CPU);
+    TensorPtr param_gpu_unfused_host = param_gpu_unfused->to(Device::CPU);
+    for (size_t i = 0; i < n; i++) {
+        CHECK(param_gpu_fused_host->at({i}) == doctest::Approx(param_cpu->at({i})).epsilon(1e-3f));
+        CHECK(param_gpu_fused_host->at({i}) == doctest::Approx(param_gpu_unfused_host->at({i})).epsilon(1e-4f));
+    }
+}

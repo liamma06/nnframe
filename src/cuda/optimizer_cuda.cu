@@ -34,6 +34,38 @@ void adamw_cuda(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar
 }
 
 
+//fusion: grad clip -> adanw update 
+__global__ void adamw_clipped_kernel(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2, const scalar_t* d_sum_sq, scalar_t max_norm) {
+    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < param_size){
+        scalar_t norm = sqrtf(*d_sum_sq);
+        scalar_t scale = (norm > max_norm) ? (max_norm / norm) : 1.0f;
+        scalar_t grad = d_grad[idx] * scale; // read from d_grad only once
+
+        scalar_t m = d_m[idx];
+        scalar_t v = d_v[idx];
+
+        m = beta1 * m + (1.0f - beta1) * grad;
+        v = beta2 * v + (1.0f - beta2) * grad * grad;
+
+        d_m[idx] = m;
+        d_v[idx] = v;
+
+        scalar_t m_hat = m / bias_correction1;
+        scalar_t v_hat = v / bias_correction2;
+
+        d_param[idx] -= lr * (m_hat / (sqrtf(v_hat) + eps) + weight_decay * d_param[idx]);
+    }
+}
+
+void adamw_clipped_cuda(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2, const scalar_t* d_sum_sq, scalar_t max_norm) {
+    dim3 blockDim(256);
+    size_t gridDim = (param_size + blockDim.x - 1) / blockDim.x;
+    adamw_clipped_kernel<<<gridDim, blockDim>>>(d_param, d_grad, d_m, d_v, param_size, lr, beta1, beta2, eps, weight_decay, bias_correction1, bias_correction2, d_sum_sq, max_norm);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 __global__ void sum_of_squares_kernel(const scalar_t* d_input, scalar_t* d_output, size_t input_size) {
     size_t tid = threadIdx.x;
     size_t idx = blockIdx.x * blockDim.x + tid;
@@ -58,6 +90,14 @@ __global__ void sum_of_squares_kernel(const scalar_t* d_input, scalar_t* d_outpu
 void sum_of_squares_cuda(const scalar_t* d_input, scalar_t* d_output, size_t input_size) {
     CUDA_CHECK(cudaMemset(d_output, 0, sizeof(scalar_t)));
 
+    dim3 blockDim(256);
+    size_t gridDim = (input_size + blockDim.x - 1) / blockDim.x;
+    sum_of_squares_kernel<<<gridDim, blockDim>>>(d_input, d_output, input_size);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// same as sum_of_squares_cuda but doesn't zero d_output first
+void sum_of_squares_accumulate_cuda(const scalar_t* d_input, scalar_t* d_output, size_t input_size) {
     dim3 blockDim(256);
     size_t gridDim = (input_size + blockDim.x - 1) / blockDim.x;
     sum_of_squares_kernel<<<gridDim, blockDim>>>(d_input, d_output, input_size);

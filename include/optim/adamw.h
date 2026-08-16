@@ -7,6 +7,7 @@
 #ifdef NNFRAME_WITH_CUDA
     #include "cuda/optimizer_cuda.cuh"
 #endif
+#include "optim/grad_clip.h"
 
 //bru hthis so confusing 
 
@@ -99,6 +100,67 @@ class AdamW{
                     param_data[j] -= lr_ * (m_hat / (std::sqrt(v_hat) + epsilon_) + weight_decay_ * param_data[j]);
                 }
             }
+        }
+
+        // grad-clip fused: AdamW reads the raw grad once and applies the clip-scale
+        void step(scalar_t max_norm) {
+            t_++;
+            scalar_t bias_correction1 = 1.0f - std::pow(beta1_, static_cast<scalar_t>(t_));
+            scalar_t bias_correction2 = 1.0f - std::pow(beta2_, static_cast<scalar_t>(t_));
+
+            #ifdef NNFRAME_WITH_CUDA
+                scalar_t* d_sum_sq = nullptr;
+                bool has_cuda_params = false;
+                for (auto& param : params_) {
+                    if (param->requires_grad() && param->device() == Device::CUDA) { has_cuda_params = true; break; }
+                }
+
+                if (has_cuda_params) {
+                    CUDA_CHECK(cudaMalloc(&d_sum_sq, sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMemset(d_sum_sq, 0, sizeof(scalar_t)));
+
+                    for (auto& param : params_) {
+                        if (param->requires_grad() && param->device() == Device::CUDA) {
+                            sum_of_squares_accumulate_cuda(param->grad().device_data(), d_sum_sq, param->numel());
+                        }
+                    }
+                }
+            #endif
+
+            // CPU params: clip -> then run the normal update 
+            std::vector<TensorPtr> cpu_params;
+            for (auto& param : params_) {
+                if (param->requires_grad() && param->device() == Device::CPU) cpu_params.push_back(param);
+            }
+            if (!cpu_params.empty()) clip_grad_norm(cpu_params, max_norm);
+
+            for (size_t i = 0; i < params_.size(); ++i) {
+                if (!params_[i]->requires_grad()) continue;
+
+                #ifdef NNFRAME_WITH_CUDA
+                    if (params_[i]->device() == Device::CUDA) {
+                        adamw_clipped_cuda(params_[i]->mutable_device_data(), params_[i]->grad().device_data(),
+                                    d_m_[i], d_v_[i], params_[i]->numel(),
+                                   lr_, beta1_, beta2_, epsilon_, weight_decay_, bias_correction1, bias_correction2,
+                                   d_sum_sq, max_norm);
+                        continue;
+                    }
+                #endif
+
+                auto& param_data = params_[i]->mutable_data();
+                auto& param_grad = params_[i]->grad().mutable_data();
+                for (size_t j = 0; j < param_data.size(); ++j) {
+                    m_[i][j] = beta1_ * m_[i][j] + (1 - beta1_) * param_grad[j];
+                    v_[i][j] = beta2_ * v_[i][j] + (1 - beta2_) * (param_grad[j] * param_grad[j]);
+                    scalar_t m_hat = m_[i][j] / bias_correction1;
+                    scalar_t v_hat = v_[i][j] / bias_correction2;
+                    param_data[j] -= lr_ * (m_hat / (std::sqrt(v_hat) + epsilon_) + weight_decay_ * param_data[j]);
+                }
+            }
+
+            #ifdef NNFRAME_WITH_CUDA
+                if (has_cuda_params) CUDA_CHECK(cudaFree(d_sum_sq));
+            #endif
         }
 
         void zero_grad() {
