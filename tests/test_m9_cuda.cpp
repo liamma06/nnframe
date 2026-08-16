@@ -7,6 +7,7 @@
 #include "cuda/layernorm_cuda.cuh"
 #include "modules/relu.h"
 #include "modules/gelu.h"
+#include "modules/linear_gelu.h"
 #include "modules/layernorm.h"
 #include "loss/cross_entrop.h"
 #include "optim/adamw.h"
@@ -1068,4 +1069,60 @@ TEST_CASE("CUDA clip_grad_norm matches CPU clip_grad_norm across multiple params
         CHECK(g1_host->at({i}) == doctest::Approx(p1_cpu->grad().at({i})).epsilon(1e-4f));
     for (size_t i = 0; i < n2; i++)
         CHECK(g2_host->at({i}) == doctest::Approx(p2_cpu->grad().at({i})).epsilon(1e-4f));
+}
+
+TEST_CASE("CUDA LinearGELU (fused bias+GELU) matches CPU LinearGELU forward and backward") {
+    const size_t batch_size = 4, in_features = 6, out_features = 5;
+
+    LinearGELU layer_cpu(in_features, out_features);
+    TensorPtr input_cpu = Tensor::create({batch_size, in_features});
+    input_cpu->set_requires_grad(true);
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (size_t i = 0; i < input_cpu->numel(); i++) input_cpu->mutable_data()[i] = dist(rng);
+
+    TensorPtr output_cpu = layer_cpu.forward(input_cpu);
+    output_cpu->backward();
+
+    // same weights/bias, moved to CUDA, same input, run through the fused CUDA path directly
+    // (LinearGELU can't be moved wholesale to CUDA, so replicate its forward() CUDA branch here)
+    std::vector<TensorPtr> params = layer_cpu.parameters();
+    TensorPtr weights_gpu = params[0]->to(Device::CUDA);
+    TensorPtr bias_gpu = params[1]->to(Device::CUDA);
+    weights_gpu->set_requires_grad(true);
+    bias_gpu->set_requires_grad(true);
+
+    TensorPtr input_gpu = input_cpu->to(Device::CUDA);
+    input_gpu->set_requires_grad(true);
+
+    TensorPtr output_xW_gpu = input_gpu->matmul(weights_gpu);
+
+    size_t n = output_xW_gpu->numel();
+    scalar_t* d_out = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+    bias_gelu_cuda(output_xW_gpu->device_data(), bias_gpu->device_data(), d_out, batch_size, out_features);
+    TensorPtr output_gpu = Tensor::from_device_ptr(d_out, output_xW_gpu->shape(), output_xW_gpu->strides());
+
+    output_gpu->set_requires_grad(true);
+    output_gpu->set_inputs(std::vector<TensorPtr>{output_xW_gpu, bias_gpu});
+    output_gpu->set_grad_fn([output_xW_gpu, bias_gpu, batch_size, out_features](const Tensor& upstream){
+        output_xW_gpu->init_grad();
+        bias_gpu->init_grad();
+        bias_gelu_grad_cuda(upstream.device_data(), output_xW_gpu->device_data(), bias_gpu->device_data(),
+                             output_xW_gpu->grad().mutable_device_data(), bias_gpu->grad().mutable_device_data(),
+                             batch_size, out_features);
+    });
+
+    output_gpu->backward();
+
+    TensorPtr output_gpu_host = output_gpu->to(Device::CPU);
+    for (size_t i = 0; i < output_cpu->numel(); i++)
+        CHECK(output_gpu_host->at({i / out_features, i % out_features}) == doctest::Approx(output_cpu->at({i / out_features, i % out_features})).epsilon(1e-3f));
+
+    TensorPtr weights_grad_host = weights_gpu->grad().to(Device::CPU);
+    TensorPtr bias_grad_host = bias_gpu->grad().to(Device::CPU);
+    for (size_t i = 0; i < params[0]->numel(); i++)
+        CHECK(weights_grad_host->at({i / out_features, i % out_features}) == doctest::Approx(params[0]->grad().at({i / out_features, i % out_features})).epsilon(1e-3f));
+    for (size_t i = 0; i < params[1]->numel(); i++)
+        CHECK(bias_grad_host->at({i}) == doctest::Approx(params[1]->grad().at({i})).epsilon(1e-3f));
 }

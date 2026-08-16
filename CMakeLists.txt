@@ -48,7 +48,7 @@ target_link_libraries(test_m4 PRIVATE nnframe_core)
 add_executable(xor examples/xor.cpp)
 target_link_libraries(xor PRIVATE nnframe_core)
 
-add_executable(spiral examples/spiral.cpp)
+add_executable(spiral examples/spiral/spiral.cpp)
 target_link_libraries(spiral PRIVATE nnframe_core)
 
 add_executable(test_m6 tests/test_m6_transformer.cpp)
@@ -99,4 +99,10 @@ if(NNFRAME_WITH_CUDA)
 
     add_executable(matmul_cuda_benchmark examples/matmul_cuda_benchmark.cpp)
     target_link_libraries(matmul_cuda_benchmark PRIVATE nnframe_core_cuda)
+
+    add_executable(matmul_grad_cuda_benchmark examples/matmul_grad_cuda_benchmark.cpp)
+    target_link_libraries(matmul_grad_cuda_benchmark PRIVATE nnframe_core_cuda)
+
+    add_executable(bias_gelu_cuda_benchmark examples/bias_gelu_cuda_benchmark.cpp)
+    target_link_libraries(bias_gelu_cuda_benchmark PRIVATE nnframe_core_cuda)
 endif()
