@@ -62,7 +62,20 @@ class Embed: public Layer{
                     CUDA_CHECK(cudaMalloc(&d_out, seq_len * embedding_dim_ * sizeof(scalar_t)));
                     embed_cuda(embedding_matrix_->device_data(), input->device_data(), d_out, seq_len, embedding_dim_);
 
-                    return Tensor::from_device_ptr(d_out, {seq_len, embedding_dim_}, {embedding_dim_, 1});
+                    auto output_tensor = Tensor::from_device_ptr(d_out, {seq_len, embedding_dim_}, {embedding_dim_, 1});
+
+                    auto self = embedding_matrix_;
+                    output_tensor->set_requires_grad(self->requires_grad());
+                    output_tensor->set_inputs(std::vector<TensorPtr>{self});
+                    size_t embedding_dim = embedding_dim_;
+                    output_tensor->set_grad_fn([self, input, seq_len, embedding_dim](const Tensor& upstream){
+                        if (self->requires_grad()){
+                            self->init_grad();
+                            embed_backward_cuda(input->device_data(), upstream.device_data(), self->grad().mutable_device_data(), seq_len, embedding_dim);
+                        }
+                    });
+
+                    return output_tensor;
                 }
             #endif
 
