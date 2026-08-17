@@ -32,6 +32,11 @@ class LayerNorm: public Layer{
             return {gamma_, beta_};
         };
 
+        void set_parameters(const std::vector<TensorPtr>& params) override{
+            gamma_ = params[0];
+            beta_ = params[1];
+        };
+
         TensorPtr forward(const TensorPtr& input) override{
             /*
                 input: embedding tensor
@@ -154,7 +159,6 @@ class LayerNorm: public Layer{
             return output_tensor;
 
         }
-
 
 
 };

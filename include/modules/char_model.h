@@ -63,6 +63,23 @@ class CharModel : public Layer{
 
             return params;
         };
+
+        void set_parameters(const std::vector<TensorPtr>& params) override{
+            size_t i = 0;
+
+            size_t n = embedding_layer_.parameters().size();
+            embedding_layer_.set_parameters({params.begin() + i, params.begin() + i + n});
+            i += n;
+
+            for (auto& block : transformer_blocks_){
+                n = block.parameters().size();
+                block.set_parameters({params.begin() + i, params.begin() + i + n});
+                i += n;
+            }
+
+            n = lm_head_.parameters().size();
+            lm_head_.set_parameters({params.begin() + i, params.begin() + i + n});
+        };
         
         //from my understanding this is more so the training forwardpass
         TensorPtr forward(const TensorPtr& input) override{

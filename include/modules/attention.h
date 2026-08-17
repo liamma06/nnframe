@@ -27,6 +27,7 @@ class SelfAttention: public Layer{
     public:
         SelfAttention(size_t embed_dim, size_t num_heads = 1);
         std::vector<TensorPtr> parameters() const override;
+        void set_parameters(const std::vector<TensorPtr>& params) override;
         TensorPtr forward(const TensorPtr& input) override;
 
         TensorPtr forward(const TensorPtr& input, KVCache& kv_cache); 

@@ -20,6 +20,7 @@ class TransformerBlock : public Layer {
     public:
         TransformerBlock(size_t embed_dim, size_t num_heads);
         std::vector<TensorPtr> parameters() const override;
+        void set_parameters(const std::vector<TensorPtr>& params) override;
         TensorPtr forward(const TensorPtr& input) override;
 
         TensorPtr forward(const TensorPtr& input, KVCache& kv_cache);

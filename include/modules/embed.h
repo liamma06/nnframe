@@ -42,6 +42,10 @@ class Embed: public Layer{
             return {embedding_matrix_};
         }
 
+        void set_parameters(const std::vector<TensorPtr>& params) override{
+            embedding_matrix_ = params[0];
+        }
+
         TensorPtr forward(const TensorPtr& input) override{
             /*
                 input: [seq_length] we only have 1D (batch size 1) for now

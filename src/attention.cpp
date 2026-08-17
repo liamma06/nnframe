@@ -40,6 +40,13 @@ std::vector<TensorPtr> SelfAttention::parameters() const{
     return {W_q_, W_k_, W_v_, W_o_};
 }
 
+void SelfAttention::set_parameters(const std::vector<TensorPtr>& params){
+    W_q_ = params[0];
+    W_k_ = params[1];
+    W_v_ = params[2];
+    W_o_ = params[3];
+}
+
 TensorPtr SelfAttention::forward(const TensorPtr& input){
     /*
         rank 2 (start)

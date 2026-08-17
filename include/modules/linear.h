@@ -15,4 +15,9 @@ class Linear : public Layer{
 
         //input-> [batch_size, in_features] output -> [batch_size, out_features]
         TensorPtr forward(const TensorPtr& input) override;
+
+        void set_parameters(const std::vector<TensorPtr>& params) override {
+            weights_ = params[0];
+            bias_ = params[1];
+        }
 };

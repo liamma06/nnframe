@@ -24,6 +24,30 @@ std::vector<TensorPtr> TransformerBlock::parameters() const {
     return params;
 }
 
+void TransformerBlock::set_parameters(const std::vector<TensorPtr>& params){
+    size_t i = 0;
+
+    size_t n = self_attention_.parameters().size();
+    self_attention_.set_parameters({params.begin() + i, params.begin() + i + n});
+    i += n;
+
+    n = layer_norm1_.parameters().size();
+    layer_norm1_.set_parameters({params.begin() + i, params.begin() + i + n});
+    i += n;
+
+    n = layer_norm2_.parameters().size();
+    layer_norm2_.set_parameters({params.begin() + i, params.begin() + i + n});
+    i += n;
+
+    n = linear1_.parameters().size();
+    linear1_.set_parameters({params.begin() + i, params.begin() + i + n});
+    i += n;
+
+    n = linear2_.parameters().size();
+    linear2_.set_parameters({params.begin() + i, params.begin() + i + n});
+    i += n;
+}
+
 TensorPtr TransformerBlock::forward(const TensorPtr& input){
     /*
         input: [seq_length, embed_dim]
