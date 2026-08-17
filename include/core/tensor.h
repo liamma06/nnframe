@@ -27,11 +27,11 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
 
         size_t compute_strides();
 
-        Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device = Device::CPU, scalar_t* device_data = nullptr); // takes in data ptr
+        Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device = Device::CPU, std::shared_ptr<scalar_t> device_data = nullptr); // takes in data ptr
 
         //device separation
-        Device device_ = Device::CPU; 
-        scalar_t* device_data_ = nullptr; // equivalent of data_ but GPU needs pointers 
+        Device device_ = Device::CPU;
+        std::shared_ptr<scalar_t> device_data_; // equivalent of data_ but GPU needs pointers.(shared_ptr tho)
 
     public:
 

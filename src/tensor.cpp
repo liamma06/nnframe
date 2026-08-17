@@ -45,7 +45,7 @@ Tensor::Tensor(std::vector<size_t> shape, std::vector<scalar_t> data){
     data_ = std::make_shared<std::vector<scalar_t>>(data); //direct input data
 }
 
-Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device, scalar_t* device_data) {
+Tensor::Tensor(std::shared_ptr<std::vector<scalar_t>> data, std::vector<size_t> shape, std::vector<size_t> strides, size_t offset, Device device, std::shared_ptr<scalar_t> device_data) {
     data_ = data;
     shape_ = shape;
     strides_ = strides;
@@ -297,7 +297,7 @@ TensorPtr Tensor::contiguous() const {
 
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
-            contiguous_cuda(device_data_, d_out, padded_shape[0], padded_shape[1], padded_shape[2], padded_stride[0], padded_stride[1], padded_stride[2], offset_, n);
+            contiguous_cuda(device_data_.get(), d_out, padded_shape[0], padded_shape[1], padded_shape[2], padded_stride[0], padded_stride[1], padded_stride[2], offset_, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, out_strides);
 
@@ -391,7 +391,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
 
-            add_cuda(device_data_, other->device_data_, d_out, n);
+            add_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
 
@@ -503,7 +503,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
 
-            sub_cuda(device_data_, other->device_data_, d_out, n);
+            sub_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
 
@@ -588,7 +588,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
 
-            mul_cuda(device_data_, other->device_data_, d_out, n);
+            mul_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
 
@@ -677,7 +677,7 @@ TensorPtr Tensor::mean() const{
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, sizeof(scalar_t)));
 
-            sum_reduce_cuda(device_data_, d_out, n);
+            sum_reduce_cuda(device_data_.get(), d_out, n);
             scale_scalar_cuda(d_out, 1.0f / static_cast<scalar_t>(n));
 
             auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{1}, std::vector<size_t>{1});
@@ -864,7 +864,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 scalar_t* d_out = nullptr;
                 CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
 
-                matmul_cuda(device_data_, other->device_data_, d_out, M, K, N);
+                matmul_cuda(device_data_.get(), other->device_data_.get(), d_out, M, K, N);
 
                 //new tensor on GPU
                 auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{M,N}, std::vector<size_t>{N,1});
@@ -895,7 +895,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 scalar_t* d_out = nullptr;
                 CUDA_CHECK(cudaMalloc(&d_out, L * M * N * sizeof(scalar_t)));
 
-                matmul_batched(device_data_, other->device_data_, d_out, M, K, N, L);
+                matmul_batched(device_data_.get(), other->device_data_.get(), d_out, M, K, N, L);
 
                 auto output_tensor = Tensor::from_device_ptr(d_out, std::vector<size_t>{L,M,N}, std::vector<size_t>{M*N,N,1});
 
@@ -1144,7 +1144,7 @@ TensorPtr Tensor::softmax(size_t dim) const{
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, rows * row_size * sizeof(scalar_t)));
 
-            softmax_cuda(device_data_, d_out, rows, row_size);
+            softmax_cuda(device_data_.get(), d_out, rows, row_size);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
 
@@ -1274,7 +1274,7 @@ TensorPtr Tensor::log() const {
             scalar_t* d_out = nullptr;
             CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
 
-            log_cuda(device_data_, d_out, n);
+            log_cuda(device_data_.get(), d_out, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, strides_);
 
@@ -1316,16 +1316,19 @@ TensorPtr Tensor::log() const {
 TensorPtr Tensor::from_device_ptr(scalar_t* d_ptr, std::vector<size_t> shape, std::vector<size_t> strides) {
     auto result = TensorPtr(new Tensor(nullptr, shape, strides, 0));
     result->device_ = Device::CUDA;
-    result->device_data_ = d_ptr;
+    #ifdef NNFRAME_WITH_CUDA
+        //similar to CPU -> like shared_ptr do clear when no longer used for all
+        result->device_data_ = std::shared_ptr<scalar_t>(d_ptr, [](scalar_t* p){ cudaFree(p); });
+    #endif
     return result;
 }
 
 const scalar_t* Tensor::device_data() const {
-    return device_data_;
+    return device_data_.get();
 }
 
 scalar_t* Tensor::mutable_device_data() {
-    return device_data_;
+    return device_data_.get();
 }
 
 //DEVICE SEPARATION
@@ -1365,12 +1368,8 @@ Tensor& Tensor::operator=(const Tensor& other){
     return *this;
 }
 
+//gets auto removed when no longer used (shared_ptr)
 Tensor::~Tensor(){
-    #ifdef NNFRAME_WITH_CUDA
-        if (device_data_ != nullptr) {
-            cudaFree(device_data_);
-        }
-    #endif
 }
 
 Device Tensor::device() const {
@@ -1405,7 +1404,7 @@ TensorPtr Tensor::to(Device device) const{
             auto host_data = std::make_shared<std::vector<scalar_t>>(numel());
 
             size_t bytes = numel() * sizeof(scalar_t);
-            CUDA_CHECK(cudaMemcpy(host_data->data(), device_data_, bytes, cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpy(host_data->data(), device_data_.get(), bytes, cudaMemcpyDeviceToHost));
 
             auto result = TensorPtr(new Tensor(host_data, shape_, strides_, 0));
             result->device_ = Device::CPU;
