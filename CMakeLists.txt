@@ -91,6 +91,7 @@ if(NNFRAME_WITH_CUDA)
         src/cuda/layernorm_cuda.cu
         src/cuda/attention_cuda.cu
         src/cuda/linear_cuda.cu
+        src/cuda/pos_embed_cuda.cu
     )
     target_include_directories(nnframe_core_cuda PUBLIC include)
     target_compile_definitions(nnframe_core_cuda PUBLIC NNFRAME_WITH_CUDA)
@@ -98,6 +99,13 @@ if(NNFRAME_WITH_CUDA)
     add_executable(test_m9 tests/test_m9_cuda.cpp)
     target_include_directories(test_m9 PRIVATE tests)
     target_link_libraries(test_m9 PRIVATE nnframe_core_cuda)
+
+    add_executable(test_m9_charmodel tests/test_m9_charmodel.cpp)
+    target_include_directories(test_m9_charmodel PRIVATE tests)
+    target_link_libraries(test_m9_charmodel PRIVATE nnframe_core_cuda)
+
+    add_executable(char_model_cuda_benchmark examples/char_model_cuda_benchmark.cpp)
+    target_link_libraries(char_model_cuda_benchmark PRIVATE nnframe_core_cuda)
 
     add_executable(matmul_cuda_benchmark examples/matmul_cuda_benchmark.cpp)
     target_link_libraries(matmul_cuda_benchmark PRIVATE nnframe_core_cuda)

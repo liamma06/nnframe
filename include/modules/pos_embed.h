@@ -5,6 +5,10 @@
 #include "modules/layer.h"
 #include "cmath"
 
+#ifdef NNFRAME_WITH_CUDA
+#include "cuda/pos_embed_cuda.cuh"
+#endif
+
 
 class PositionalEmbed : public Layer{
     public:
@@ -12,12 +16,22 @@ class PositionalEmbed : public Layer{
             /*
                 input: [seq_length, embed_dim]
                 output: [seq_length, embed_dim]
-                Positional encoding is added to the input embeddings to provide information about the position of each token in the sequence. 
+                Positional encoding is added to the input embeddings to provide information about the position of each token in the sequence.
                 The encoding is based on sine and cosine functions of different frequencies.
                 https://www.geeksforgeeks.org/nlp/positional-encoding-in-transformers/
             */
             size_t seq_length = input->shape()[0];
             size_t embed_dim = input->shape()[1];
+
+            #ifdef NNFRAME_WITH_CUDA
+                if (input->device() == Device::CUDA){
+                    scalar_t* d_pos = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_pos, seq_length * embed_dim * sizeof(scalar_t)));
+                    pos_embed_cuda(d_pos, seq_length, embed_dim, 0);
+                    TensorPtr pos_table = Tensor::from_device_ptr(d_pos, std::vector<size_t>{seq_length, embed_dim}, std::vector<size_t>{embed_dim, 1});
+                    return input->add(pos_table);
+                }
+            #endif
 
             auto output_tensor = Tensor::create({seq_length, embed_dim});
 
@@ -45,6 +59,16 @@ class PositionalEmbed : public Layer{
         TensorPtr forward(const TensorPtr& input, size_t start_pos){
             size_t seq_length = input->shape()[0];
             size_t embed_dim = input->shape()[1];
+
+            #ifdef NNFRAME_WITH_CUDA
+                if (input->device() == Device::CUDA){
+                    scalar_t* d_pos = nullptr;
+                    CUDA_CHECK(cudaMalloc(&d_pos, seq_length * embed_dim * sizeof(scalar_t)));
+                    pos_embed_cuda(d_pos, seq_length, embed_dim, start_pos);
+                    TensorPtr pos_table = Tensor::from_device_ptr(d_pos, std::vector<size_t>{seq_length, embed_dim}, std::vector<size_t>{embed_dim, 1});
+                    return input->add(pos_table);
+                }
+            #endif
 
             auto output_tensor = Tensor::create({seq_length, embed_dim});
 
