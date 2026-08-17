@@ -6,7 +6,7 @@
 #include "modules/layer.h"
 
 #ifdef NNFRAME_WITH_CUDA
-#include "cuda/elementwise_cuda.cuh"
+#include "cuda/linear_cuda.cuh"
 #endif
 
 // Linear followed by GELU, fused: matmul stays a separate op (reuses Tensor::matmul),
