@@ -62,10 +62,10 @@ add_executable(test_m7 tests/test_m7_kvcache.cpp)
 target_include_directories(test_m7 PRIVATE tests)
 target_link_libraries(test_m7 PRIVATE nnframe_core)
 
-add_executable(kv_cache_benchmark examples/kv_cache_benchmark.cpp)
+add_executable(kv_cache_benchmark examples/benchmarks/kv_cache_benchmark.cpp)
 target_link_libraries(kv_cache_benchmark PRIVATE nnframe_core)
 
-add_executable(matmul_benchmark examples/matmul_benchmark.cpp)
+add_executable(matmul_benchmark examples/benchmarks/matmul_benchmark.cpp)
 target_link_libraries(matmul_benchmark PRIVATE nnframe_core)
 
 option(NNFRAME_WITH_CUDA "Build CUDA targets" ON)
@@ -105,18 +105,18 @@ if(NNFRAME_WITH_CUDA)
     target_include_directories(test_m9_charmodel PRIVATE tests)
     target_link_libraries(test_m9_charmodel PRIVATE nnframe_core_cuda)
 
-    add_executable(char_model_cuda_benchmark examples/char_model_cuda_benchmark.cpp)
+    add_executable(char_model_cuda_benchmark examples/benchmarks/char_model_cuda_benchmark.cpp)
     target_link_libraries(char_model_cuda_benchmark PRIVATE nnframe_core_cuda)
 
-    add_executable(matmul_cuda_benchmark examples/matmul_cuda_benchmark.cpp)
+    add_executable(matmul_cuda_benchmark examples/benchmarks/matmul_cuda_benchmark.cpp)
     target_link_libraries(matmul_cuda_benchmark PRIVATE nnframe_core_cuda)
 
-    add_executable(matmul_grad_cuda_benchmark examples/matmul_grad_cuda_benchmark.cpp)
+    add_executable(matmul_grad_cuda_benchmark examples/benchmarks/matmul_grad_cuda_benchmark.cpp)
     target_link_libraries(matmul_grad_cuda_benchmark PRIVATE nnframe_core_cuda)
 
-    add_executable(bias_gelu_cuda_benchmark examples/bias_gelu_cuda_benchmark.cpp)
+    add_executable(bias_gelu_cuda_benchmark examples/benchmarks/bias_gelu_cuda_benchmark.cpp)
     target_link_libraries(bias_gelu_cuda_benchmark PRIVATE nnframe_core_cuda)
 
-    add_executable(adamw_clip_cuda_benchmark examples/adamw_clip_cuda_benchmark.cpp)
+    add_executable(adamw_clip_cuda_benchmark examples/benchmarks/adamw_clip_cuda_benchmark.cpp)
     target_link_libraries(adamw_clip_cuda_benchmark PRIVATE nnframe_core_cuda)
 endif()
