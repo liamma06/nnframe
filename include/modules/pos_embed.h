@@ -26,7 +26,7 @@ class PositionalEmbed : public Layer{
             #ifdef NNFRAME_WITH_CUDA
                 if (input->device() == Device::CUDA){
                     scalar_t* d_pos = nullptr;
-                    CUDA_CHECK(cudaMalloc(&d_pos, seq_length * embed_dim * sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMallocAsync(&d_pos, seq_length * embed_dim * sizeof(scalar_t), 0));
                     pos_embed_cuda(d_pos, seq_length, embed_dim, 0);
                     TensorPtr pos_table = Tensor::from_device_ptr(d_pos, std::vector<size_t>{seq_length, embed_dim}, std::vector<size_t>{embed_dim, 1});
                     return input->add(pos_table);
@@ -63,7 +63,7 @@ class PositionalEmbed : public Layer{
             #ifdef NNFRAME_WITH_CUDA
                 if (input->device() == Device::CUDA){
                     scalar_t* d_pos = nullptr;
-                    CUDA_CHECK(cudaMalloc(&d_pos, seq_length * embed_dim * sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMallocAsync(&d_pos, seq_length * embed_dim * sizeof(scalar_t), 0));
                     pos_embed_cuda(d_pos, seq_length, embed_dim, start_pos);
                     TensorPtr pos_table = Tensor::from_device_ptr(d_pos, std::vector<size_t>{seq_length, embed_dim}, std::vector<size_t>{embed_dim, 1});
                     return input->add(pos_table);

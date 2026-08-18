@@ -296,7 +296,7 @@ TensorPtr Tensor::contiguous() const {
             }
 
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
             contiguous_cuda(device_data_.get(), d_out, padded_shape[0], padded_shape[1], padded_shape[2], padded_stride[0], padded_stride[1], padded_stride[2], offset_, n);
 
             auto output_tensor = Tensor::from_device_ptr(d_out, shape_, out_strides);
@@ -389,7 +389,7 @@ TensorPtr Tensor::add(const TensorPtr& other) const{
 
             size_t n = numel();
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
             add_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
@@ -501,7 +501,7 @@ TensorPtr Tensor::sub(const TensorPtr& other) const {
 
             size_t n = numel();
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
             sub_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
@@ -586,7 +586,7 @@ TensorPtr Tensor::mul(const TensorPtr& other) const {
 
             size_t n = numel();
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
             mul_cuda(device_data_.get(), other->device_data_.get(), d_out, n);
 
@@ -675,7 +675,7 @@ TensorPtr Tensor::mean() const{
         if (device_ == Device::CUDA){
             size_t n = numel();
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, sizeof(scalar_t), 0));
 
             sum_reduce_cuda(device_data_.get(), d_out, n);
             scale_scalar_cuda(d_out, 1.0f / static_cast<scalar_t>(n));
@@ -862,7 +862,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 size_t N = other->shape()[1];
 
                 scalar_t* d_out = nullptr;
-                CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
+                CUDA_CHECK(cudaMallocAsync(&d_out, M * N * sizeof(scalar_t), 0));
 
                 matmul_cuda(device_data_.get(), other->device_data_.get(), d_out, M, K, N);
 
@@ -893,7 +893,7 @@ TensorPtr Tensor::matmul(const TensorPtr& other) const {
                 assert(L == other->shape()[0] && "Leading (head) dimension must match for batched matmul");
 
                 scalar_t* d_out = nullptr;
-                CUDA_CHECK(cudaMalloc(&d_out, L * M * N * sizeof(scalar_t)));
+                CUDA_CHECK(cudaMallocAsync(&d_out, L * M * N * sizeof(scalar_t), 0));
 
                 matmul_batched(device_data_.get(), other->device_data_.get(), d_out, M, K, N, L);
 
@@ -1049,7 +1049,7 @@ void Tensor::init_grad() {
     else if (device_ == Device::CUDA){
        size_t n = numel();
        scalar_t* d_grad = nullptr;
-        CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
+        CUDA_CHECK(cudaMallocAsync(&d_grad, n * sizeof(scalar_t), 0));
         CUDA_CHECK(cudaMemset(d_grad, 0, n * sizeof(scalar_t)));
 
         std::vector<size_t> standard_strides(shape_.size());
@@ -1078,7 +1078,7 @@ void Tensor::backward(){
         size_t n = numel();
         std::vector<scalar_t> ones(n, 1.0f);
         scalar_t* d_grad = nullptr;
-        CUDA_CHECK(cudaMalloc(&d_grad, n * sizeof(scalar_t)));
+        CUDA_CHECK(cudaMallocAsync(&d_grad, n * sizeof(scalar_t), 0));
         CUDA_CHECK(cudaMemcpy(d_grad, ones.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));
         std::vector<size_t> standard_strides(shape_.size());
         size_t stride = 1;
@@ -1142,7 +1142,7 @@ TensorPtr Tensor::softmax(size_t dim) const{
             size_t row_size = shape_[rank() - 1];
 
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, rows * row_size * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, rows * row_size * sizeof(scalar_t), 0));
 
             softmax_cuda(device_data_.get(), d_out, rows, row_size);
 
@@ -1272,7 +1272,7 @@ TensorPtr Tensor::log() const {
         if (device_ == Device::CUDA){
             size_t n = numel();
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
             log_cuda(device_data_.get(), d_out, n);
 
@@ -1318,7 +1318,7 @@ TensorPtr Tensor::from_device_ptr(scalar_t* d_ptr, std::vector<size_t> shape, st
     result->device_ = Device::CUDA;
     #ifdef NNFRAME_WITH_CUDA
         //similar to CPU -> like shared_ptr do clear when no longer used for all
-        result->device_data_ = std::shared_ptr<scalar_t>(d_ptr, [](scalar_t* p){ cudaFree(p); });
+        result->device_data_ = std::shared_ptr<scalar_t>(d_ptr, [](scalar_t* p){ cudaFreeAsync(p, 0); });
     #endif
     return result;
 }
@@ -1387,7 +1387,7 @@ TensorPtr Tensor::to(Device device) const{
             size_t bytes = src->numel() * sizeof(scalar_t);
             scalar_t* d_ptr = nullptr;
 
-            CUDA_CHECK(cudaMalloc(&d_ptr, bytes));
+            CUDA_CHECK(cudaMallocAsync(&d_ptr, bytes, 0));
             CUDA_CHECK(cudaMemcpy(d_ptr, src->data_->data(), bytes, cudaMemcpyHostToDevice));
 
             //new tensor with GPU pointer, same shape and strides

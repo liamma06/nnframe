@@ -129,7 +129,7 @@ void grad_clip_cuda(scalar_t* d_grad, const scalar_t* d_sum_sq, size_t n, scalar
 
 void clip_grad_norm_cuda(std::vector<scalar_t*> d_grads, std::vector<size_t> sizes, scalar_t max_norm) {
     scalar_t* d_sum_sq = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_sum_sq, sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_sum_sq, sizeof(scalar_t), 0));
     CUDA_CHECK(cudaMemset(d_sum_sq, 0, sizeof(scalar_t))); 
 
     dim3 blockDim(256);
@@ -146,5 +146,5 @@ void clip_grad_norm_cuda(std::vector<scalar_t*> d_grads, std::vector<size_t> siz
     }
     CUDA_CHECK(cudaGetLastError());
 
-    CUDA_CHECK(cudaFree(d_sum_sq));
+    CUDA_CHECK(cudaFreeAsync(d_sum_sq, 0));
 }

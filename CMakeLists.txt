@@ -92,6 +92,7 @@ if(NNFRAME_WITH_CUDA)
         src/cuda/attention_cuda.cu
         src/cuda/linear_cuda.cu
         src/cuda/pos_embed_cuda.cu
+        src/cuda/mempool.cu
     )
     target_include_directories(nnframe_core_cuda PUBLIC include)
     target_compile_definitions(nnframe_core_cuda PUBLIC NNFRAME_WITH_CUDA)

@@ -15,7 +15,7 @@ class ReLu: public Layer{
             if (input->device() == Device::CUDA){
                 size_t n = input->numel();
                 scalar_t* d_out = nullptr;
-                CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+                CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
                 relu_cuda(input->device_data(), d_out, n);
 

@@ -17,11 +17,11 @@ __global__ void nll_gather_kernel(const scalar_t* probs, const scalar_t* targets
 
 void cross_entropy_cuda(const scalar_t* d_logits, const scalar_t* d_targets, scalar_t* d_loss, size_t rows, size_t vocab_size) {
     scalar_t* d_probs = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_probs, rows * vocab_size * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_probs, rows * vocab_size * sizeof(scalar_t), 0));
     softmax_cuda(d_logits, d_probs, rows, vocab_size);
 
     scalar_t* d_row_loss = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_row_loss, rows * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_row_loss, rows * sizeof(scalar_t), 0));
 
     size_t blockDim = 256;
     size_t gridDim = (rows + blockDim - 1) / blockDim;
@@ -31,8 +31,8 @@ void cross_entropy_cuda(const scalar_t* d_logits, const scalar_t* d_targets, sca
     sum_reduce_cuda(d_row_loss, d_loss, rows);
     scale_scalar_cuda(d_loss, 1.0f / static_cast<scalar_t>(rows));
 
-    CUDA_CHECK(cudaFree(d_probs));
-    CUDA_CHECK(cudaFree(d_row_loss));
+    CUDA_CHECK(cudaFreeAsync(d_probs, 0));
+    CUDA_CHECK(cudaFreeAsync(d_row_loss, 0));
 }
 
 __global__ void cross_entropy_backward_kernel(const scalar_t* probs, const scalar_t* targets, scalar_t* grad_logits, size_t rows, size_t vocab_size, const scalar_t* d_upstream) {
@@ -51,7 +51,7 @@ __global__ void cross_entropy_backward_kernel(const scalar_t* probs, const scala
 
 void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_targets, scalar_t* d_grad_logits, size_t rows, size_t vocab_size, const scalar_t* d_upstream) {
     scalar_t* d_probs = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_probs, rows * vocab_size * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_probs, rows * vocab_size * sizeof(scalar_t), 0));
     softmax_cuda(d_logits, d_probs, rows, vocab_size);
 
     size_t total = rows * vocab_size;
@@ -60,5 +60,5 @@ void cross_entropy_backward_cuda(const scalar_t* d_logits, const scalar_t* d_tar
     cross_entropy_backward_kernel<<<gridDim, blockDim>>>(d_probs, d_targets, d_grad_logits, rows, vocab_size, d_upstream);
     CUDA_CHECK(cudaGetLastError());
 
-    CUDA_CHECK(cudaFree(d_probs));
+    CUDA_CHECK(cudaFreeAsync(d_probs, 0));
 }

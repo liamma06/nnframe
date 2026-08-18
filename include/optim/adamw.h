@@ -50,8 +50,8 @@ class AdamW{
                 #ifdef NNFRAME_WITH_CUDA
                     else if(params[i]->device() == Device::CUDA){
                         size_t n = params[i]->numel();
-                        CUDA_CHECK(cudaMalloc(&d_m_[i], n * sizeof(scalar_t)));
-                        CUDA_CHECK(cudaMalloc(&d_v_[i], n * sizeof(scalar_t)));
+                        CUDA_CHECK(cudaMallocAsync(&d_m_[i], n * sizeof(scalar_t), 0));
+                        CUDA_CHECK(cudaMallocAsync(&d_v_[i], n * sizeof(scalar_t), 0));
                         CUDA_CHECK(cudaMemset(d_m_[i], 0, n * sizeof(scalar_t)));
                         CUDA_CHECK(cudaMemset(d_v_[i], 0, n * sizeof(scalar_t)));
                     }
@@ -63,7 +63,7 @@ class AdamW{
             #ifdef NNFRAME_WITH_CUDA
                 for (size_t i = 0; i < params.size(); ++i) {
                     if (params[i]->device() == Device::CUDA) {
-                        CUDA_CHECK(cudaMalloc(&d_sum_sq_, sizeof(scalar_t)));
+                        CUDA_CHECK(cudaMallocAsync(&d_sum_sq_, sizeof(scalar_t), 0));
                         break;
                     }
                 }
@@ -74,11 +74,11 @@ class AdamW{
             #ifdef NNFRAME_WITH_CUDA
                 for (size_t i = 0; i < params_.size(); ++i) {
                     if(params_[i]->device() == Device::CUDA){
-                        CUDA_CHECK(cudaFree(d_m_[i]));
-                        CUDA_CHECK(cudaFree(d_v_[i]));
+                        CUDA_CHECK(cudaFreeAsync(d_m_[i], 0));
+                        CUDA_CHECK(cudaFreeAsync(d_v_[i], 0));
                     }
                 }
-                if (d_sum_sq_) CUDA_CHECK(cudaFree(d_sum_sq_));
+                if (d_sum_sq_) CUDA_CHECK(cudaFreeAsync(d_sum_sq_, 0));
             #endif
         }
 

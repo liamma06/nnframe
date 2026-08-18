@@ -45,7 +45,7 @@ class LinearGELU : public Layer{
                 if (output_xW->device() == Device::CUDA){
                     size_t n = output_xW->numel();
                     scalar_t* d_out = nullptr;
-                    CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMallocAsync(&d_out, n * sizeof(scalar_t), 0));
 
                     bias_gelu_cuda(output_xW->device_data(), bias_->device_data(), d_out, batch_size, features);
 

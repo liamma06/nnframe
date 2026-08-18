@@ -205,38 +205,38 @@ void matmul_grad_cuda(const scalar_t* d_upstream, const scalar_t* d_self, const 
         - matmul_accumulate_cuda writes the product straight into the grad buffer with +=, no temp needed
     */
     scalar_t* d_other_T = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_other_T, N * K * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_other_T, N * K * sizeof(scalar_t), 0));
     transpose_cuda(d_other, d_other_T, K, N);
 
     matmul_accumulate_cuda(d_upstream, d_other_T, d_self_grad, M, N, K);
 
-    CUDA_CHECK(cudaFree(d_other_T));
+    CUDA_CHECK(cudaFreeAsync(d_other_T, 0));
 
     scalar_t* d_self_T = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_self_T, K * M * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_self_T, K * M * sizeof(scalar_t), 0));
     transpose_cuda(d_self, d_self_T, M, K);
 
     matmul_accumulate_cuda(d_self_T, d_upstream, d_other_grad, K, M, N);
 
-    CUDA_CHECK(cudaFree(d_self_T));
+    CUDA_CHECK(cudaFreeAsync(d_self_T, 0));
 }
 
 void matmul_grad_batched_cuda(const scalar_t* d_upstream, const scalar_t* d_self, const scalar_t* d_other, scalar_t* d_self_grad, scalar_t* d_other_grad, size_t M, size_t K, size_t N, size_t batch_size) {
     scalar_t* d_other_T = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_other_T, batch_size * N * K * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_other_T, batch_size * N * K * sizeof(scalar_t), 0));
     transpose_batched_cuda(d_other, d_other_T, K, N, batch_size);
 
     matmul_batched_accumulate_cuda(d_upstream, d_other_T, d_self_grad, M, N, K, batch_size);
 
-    CUDA_CHECK(cudaFree(d_other_T));
+    CUDA_CHECK(cudaFreeAsync(d_other_T, 0));
 
     scalar_t* d_self_T = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_self_T, batch_size * K * M * sizeof(scalar_t)));
+    CUDA_CHECK(cudaMallocAsync(&d_self_T, batch_size * K * M * sizeof(scalar_t), 0));
     transpose_batched_cuda(d_self, d_self_T, M, K, batch_size);
 
     matmul_batched_accumulate_cuda(d_self_T, d_upstream, d_other_grad, K, M, N, batch_size);
 
-    CUDA_CHECK(cudaFree(d_self_T));
+    CUDA_CHECK(cudaFreeAsync(d_self_T, 0));
 }
 
 

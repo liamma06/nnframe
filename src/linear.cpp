@@ -46,7 +46,7 @@ TensorPtr Linear::forward(const TensorPtr& input){
             size_t n = output_xW->numel();
 
             scalar_t* d_out = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_out, n*sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, n*sizeof(scalar_t), 0));
 
             add_bias_cuda(output_xW->device_data(), bias_->device_data(), d_out, batch_size, out_features);
 

@@ -1,5 +1,6 @@
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
+#include "cuda/mempool.cuh"
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -19,6 +20,8 @@ namespace {
 }
 
 int main() {
+    init_cuda_mempool();
+
     const size_t M = 512, K = 512, N = 512;
     const int trials = 20;
 
@@ -31,9 +34,9 @@ int main() {
     auto start_full = std::chrono::high_resolution_clock::now();
     for (int t = 0; t < trials; t++) {
         scalar_t *d_a, *d_b, *d_out;
-        CUDA_CHECK(cudaMalloc(&d_a, M * K * sizeof(scalar_t)));
-        CUDA_CHECK(cudaMalloc(&d_b, K * N * sizeof(scalar_t)));
-        CUDA_CHECK(cudaMalloc(&d_out, M * N * sizeof(scalar_t)));
+        CUDA_CHECK(cudaMallocAsync(&d_a, M * K * sizeof(scalar_t), 0));
+        CUDA_CHECK(cudaMallocAsync(&d_b, K * N * sizeof(scalar_t), 0));
+        CUDA_CHECK(cudaMallocAsync(&d_out, M * N * sizeof(scalar_t), 0));
 
         CUDA_CHECK(cudaMemcpy(d_a, h_a.data(), M * K * sizeof(scalar_t), cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(d_b, h_b.data(), K * N * sizeof(scalar_t), cudaMemcpyHostToDevice));
@@ -42,9 +45,9 @@ int main() {
 
         CUDA_CHECK(cudaMemcpy(h_out.data(), d_out, M * N * sizeof(scalar_t), cudaMemcpyDeviceToHost));
 
-        CUDA_CHECK(cudaFree(d_a));
-        CUDA_CHECK(cudaFree(d_b));
-        CUDA_CHECK(cudaFree(d_out));
+        CUDA_CHECK(cudaFreeAsync(d_a, 0));
+        CUDA_CHECK(cudaFreeAsync(d_b, 0));
+        CUDA_CHECK(cudaFreeAsync(d_out, 0));
     }
     auto end_full = std::chrono::high_resolution_clock::now();
 

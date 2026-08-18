@@ -96,7 +96,7 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     #ifdef NNFRAME_WITH_CUDA
         if (raw_scores->device() == Device::CUDA){
             scalar_t* d_scaled = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_scaled, raw_scores->numel() * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_scaled, raw_scores->numel() * sizeof(scalar_t), 0));
             scale_tensor_cuda(raw_scores->device_data(), d_scaled, score_scale, raw_scores->numel());
             scores = Tensor::from_device_ptr(d_scaled, raw_scores->shape(), raw_scores->strides());
 
@@ -125,7 +125,7 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
             size_t seq_len_q = scores->shape()[1];
             size_t seq_len_k = scores->shape()[2];
 
-            CUDA_CHECK(cudaMalloc(&d_out, scores->numel() * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_out, scores->numel() * sizeof(scalar_t), 0));
             causal_mask_cuda(scores->device_data(), d_out, heads, seq_len_q, seq_len_k);
             masked_scores = Tensor::from_device_ptr(d_out, scores->shape(), scores->strides());
         
@@ -226,7 +226,7 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
     #ifdef NNFRAME_WITH_CUDA
         if (raw_scores->device() == Device::CUDA){
             scalar_t* d_scaled = nullptr;
-            CUDA_CHECK(cudaMalloc(&d_scaled, raw_scores->numel() * sizeof(scalar_t)));
+            CUDA_CHECK(cudaMallocAsync(&d_scaled, raw_scores->numel() * sizeof(scalar_t), 0));
             scale_tensor_cuda(raw_scores->device_data(), d_scaled, score_scale, raw_scores->numel());
             scores = Tensor::from_device_ptr(d_scaled, raw_scores->shape(), raw_scores->strides());
         }
@@ -254,7 +254,7 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
                 size_t seq_len_q = scores->shape()[1];
                 size_t seq_len_k = scores->shape()[2];
 
-                CUDA_CHECK(cudaMalloc(&d_out, scores->numel() * sizeof(scalar_t)));
+                CUDA_CHECK(cudaMallocAsync(&d_out, scores->numel() * sizeof(scalar_t), 0));
                 causal_mask_cuda(scores->device_data(), d_out, heads, seq_len_q, seq_len_k);
                 masked_scores = Tensor::from_device_ptr(d_out, scores->shape(), scores->strides());
             }

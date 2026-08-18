@@ -1,5 +1,6 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
+#include "cuda/mempool.cuh"
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
 #include "cuda/embed_cuda.cuh"
@@ -1492,4 +1493,12 @@ TEST_CASE("CUDA TransformerBlock forward+backward (full block, chaining every CU
         for (size_t i = 0; i < params[p]->numel(); i++)
             CHECK(grad_host->data()[i] == doctest::Approx(params[p]->grad().data()[i]).epsilon(1e-3f));
     }
+}
+
+int main(int argc, char** argv) {
+    init_cuda_mempool();
+
+    doctest::Context context;
+    context.applyCommandLine(argc, argv);
+    return context.run();
 }

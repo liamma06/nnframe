@@ -52,7 +52,7 @@ class LayerNorm: public Layer{
             #ifdef NNFRAME_WITH_CUDA
                 if (input->device() == Device::CUDA){
                     scalar_t* d_out = nullptr;
-                    CUDA_CHECK(cudaMalloc(&d_out, seq_len * embed_dim * sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMallocAsync(&d_out, seq_len * embed_dim * sizeof(scalar_t), 0));
 
                     layernorm_cuda(input->device_data(), gamma_->device_data(), beta_->device_data(), d_out, seq_len, embed_dim, 1e-5f);
 

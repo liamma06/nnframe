@@ -1,5 +1,6 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
+#include "cuda/mempool.cuh"
 #include "core/tensor.h"
 #include "cuda/matmul_cuda.cuh"
 #include "cuda/embed_cuda.cuh"
@@ -59,4 +60,12 @@ TEST_CASE("CUDA CharModel (1 transformer block) forward+backward matches CPU") {
 
 TEST_CASE("CUDA CharModel (multiple stacked transformer blocks) forward+backward matches CPU") {
     check_charmodel_matches_cpu(/*vocab_size=*/10, /*embedding_dim=*/8, /*num_heads=*/2, /*num_blocks=*/3, /*seq_len=*/4, /*seed=*/23);
+}
+
+int main(int argc, char** argv) {
+    init_cuda_mempool();
+
+    doctest::Context context;
+    context.applyCommandLine(argc, argv);
+    return context.run();
 }

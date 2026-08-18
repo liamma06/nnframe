@@ -33,7 +33,7 @@ class CrossEntropy: public Loss{
             #ifdef NNFRAME_WITH_CUDA
                 if (logits->device() == Device::CUDA){
                     scalar_t* d_loss = nullptr;
-                    CUDA_CHECK(cudaMalloc(&d_loss, sizeof(scalar_t)));
+                    CUDA_CHECK(cudaMallocAsync(&d_loss, sizeof(scalar_t), 0));
 
                     cross_entropy_cuda(logits->device_data(), targets->device_data(), d_loss, seq_len, vocab_size);
 
