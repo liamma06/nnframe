@@ -18,6 +18,7 @@
 #include "loss/cross_entrop.h"
 #include "optim/adamw.h"
 #include "optim/grad_clip.h"
+#include "infer/kv_cache.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -1492,6 +1493,51 @@ TEST_CASE("CUDA TransformerBlock forward+backward (full block, chaining every CU
         TensorPtr grad_host = params_gpu[p]->grad().to(Device::CPU);
         for (size_t i = 0; i < params[p]->numel(); i++)
             CHECK(grad_host->data()[i] == doctest::Approx(params[p]->grad().data()[i]).epsilon(1e-3f));
+    }
+}
+
+TEST_CASE("CUDA KVCache::grow (via append) matches CPU across multiple appends") {
+    size_t heads = 3, head_dim = 4;
+    std::vector<size_t> chunk_seq_lens = {2, 3, 1}; // simulates prefill (2) then two decode steps
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    // build the same random k/v chunks once, reused for both the CPU and CUDA caches
+    std::vector<TensorPtr> k_chunks, v_chunks;
+    for (size_t seq_len : chunk_seq_lens) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        k_chunks.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data));
+        v_chunks.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data));
+    }
+
+    KVCache cpu_cache;
+    for (size_t i = 0; i < k_chunks.size(); i++) {
+        cpu_cache.append(k_chunks[i], v_chunks[i]);
+    }
+    TensorPtr k_cpu = cpu_cache.get_k();
+    TensorPtr v_cpu = cpu_cache.get_v();
+
+    KVCache cuda_cache;
+    for (size_t i = 0; i < k_chunks.size(); i++) {
+        cuda_cache.append(k_chunks[i]->to(Device::CUDA), v_chunks[i]->to(Device::CUDA));
+    }
+    TensorPtr k_gpu_host = cuda_cache.get_k()->to(Device::CPU);
+    TensorPtr v_gpu_host = cuda_cache.get_v()->to(Device::CPU);
+
+    REQUIRE(k_gpu_host->shape() == k_cpu->shape());
+    REQUIRE(v_gpu_host->shape() == v_cpu->shape());
+
+    for (size_t i = 0; i < heads; i++) {
+        for (size_t j = 0; j < k_cpu->shape()[1]; j++) {
+            for (size_t k = 0; k < head_dim; k++) {
+                CHECK(k_gpu_host->at({i, j, k}) == doctest::Approx(k_cpu->at({i, j, k})));
+                CHECK(v_gpu_host->at({i, j, k}) == doctest::Approx(v_cpu->at({i, j, k})));
+            }
+        }
     }
 }
 
