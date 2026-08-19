@@ -42,8 +42,39 @@ KVBlockPool::KVBlockPool(size_t num_heads, size_t head_dim, size_t max_blocks, s
     pool_v_ = Tensor::create({num_heads_, max_blocks_ * block_size_, head_dim_});   
 }
 
+//evict 
+void KVBlockPool::touch_block(size_t block_idx){
+    auto it = lru_iters_.find(block_idx);
+    if (it != lru_iters_.end()) {
+        lru_list_.erase(it->second);
+    }
+    //update to front of list
+    lru_list_.push_front(block_idx);
+    lru_iters_[block_idx] = lru_list_.begin();
+}
 
- void KVBlockPool::append(size_t sequence_id, const TensorPtr& k, const TensorPtr& v){
+size_t KVBlockPool::evict_block(){
+    if (lru_list_.empty()) {
+        throw std::runtime_error("No blocks to evict");
+    }
+
+    //remove from list 
+    size_t victim = lru_list_.back();
+    lru_list_.pop_back();
+    lru_iters_.erase(victim);
+
+    //remove from owner sequence
+    size_t owner_id = block_owner_.at(victim);
+    SequenceState& owner_state = sequences_.at(owner_id);
+    auto& table = owner_state.block_table;
+    table.erase(std::remove(table.begin(), table.end(), victim), table.end());
+
+    block_owner_.erase(victim);
+    return victim;
+}
+    
+
+void KVBlockPool::append(size_t sequence_id, const TensorPtr& k, const TensorPtr& v){
     SequenceState& state = sequences_[sequence_id]; //get or create 
     size_t new_seq_len = k -> shape()[1]; //num of new tokens to add 
     size_t src_pos = 0; 
@@ -51,15 +82,20 @@ KVBlockPool::KVBlockPool(size_t num_heads, size_t head_dim, size_t max_blocks, s
     while (src_pos < new_seq_len){
         //grab fresh block or curr block full
         if (state.block_table.empty() || state.tokens_in_last_block == block_size_){
-            if (free_blocks_.empty()){
-                throw std::runtime_error("No free blocks available in KVBlockPool");
+            size_t new_block;
+            if (!free_blocks_.empty()){
+                new_block = free_blocks_.back();
+                free_blocks_.pop_back();
+            } else {
+                new_block = evict_block();
             }
-            state.block_table.push_back(free_blocks_.back());
-            free_blocks_.pop_back();
+            state.block_table.push_back(new_block);
+            block_owner_[new_block] = sequence_id;
             state.tokens_in_last_block = 0;
         }
 
         size_t block_idx = state.block_table.back();
+        touch_block(block_idx); // mark as recently use
         size_t room = block_size_ - state.tokens_in_last_block;
         size_t tokens_to_copy = std::min(room, new_seq_len - src_pos); //what is possible
 

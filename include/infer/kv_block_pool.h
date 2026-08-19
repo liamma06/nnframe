@@ -1,6 +1,7 @@
 #pragma once
 #include "core/tensor.h"
 #include <unordered_map>
+#include <list>
 
 class KVBlockPool {
     private:
@@ -21,6 +22,18 @@ class KVBlockPool {
         size_t tokens_in_last_block = 0;
     };
     std::unordered_map<size_t, SequenceState> sequences_;
+
+    /*
+        eviction:
+        -LRU list of sequence ids
+        -remove from related owner (block -> sequence id mapping)
+    */
+    std::list<size_t> lru_list_; 
+    std::unordered_map<size_t, std::list<size_t>::iterator> lru_iters_; //quick look up 
+    std::unordered_map<size_t, size_t> block_owner_; 
+
+    void touch_block(size_t block_idx);
+    size_t evict_block();
 
 
     public:

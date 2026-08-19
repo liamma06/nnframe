@@ -344,14 +344,35 @@ TEST_CASE("KVBlockPool: two interleaved sequences don't corrupt each other, matc
     }
 }
 
-TEST_CASE("KVBlockPool: throws when the pool runs out of blocks") {
+TEST_CASE("KVBlockPool: evicts the least-recently-used sequence's block when full") {
+    // 1 block total -- sequence 0 fills it, then sequence 1 needs a block and must evict it
     KVBlockPool pool(/*num_heads=*/1, /*head_dim=*/2, /*max_blocks=*/1, /*block_size=*/2);
 
-    auto k1 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
-    auto v1 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
-    pool.append(0, k1, v1); // fills the only block
+    auto k0 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
+    auto v0 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
+    pool.append(0, k0, v0); // fills the only block with sequence 0's data
 
-    auto k2 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
-    auto v2 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
-    CHECK_THROWS_AS(pool.append(0, k2, v2), std::runtime_error);
+    CHECK(pool.get_k(0)->shape()[1] == 2); // sequence 0 has its 2 tokens
+
+    // sequence 1 needs a block, none are free -- should evict sequence 0's block, not throw
+    auto k1 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
+    auto v1 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
+    pool.append(1, k1, v1);
+
+    // sequence 1 now owns the (only) block
+    CHECK(pool.get_k(1)->shape()[1] == 1);
+    CHECK(pool.get_k(1)->at({0, 0, 0}) == 5.0f);
+    CHECK(pool.get_k(1)->at({0, 0, 1}) == 6.0f);
+
+    // sequence 0 lost its block to eviction -- it should now have 0 tokens
+    CHECK(pool.get_k(0)->shape()[1] == 0);
+}
+
+TEST_CASE("KVBlockPool: throws only when there is truly nothing left to evict") {
+    // max_blocks=0 -- no blocks exist at all, free or otherwise
+    KVBlockPool pool(/*num_heads=*/1, /*head_dim=*/2, /*max_blocks=*/0, /*block_size=*/2);
+
+    auto k = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{1, 2});
+    auto v = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{1, 2});
+    CHECK_THROWS_AS(pool.append(0, k, v), std::runtime_error);
 }
