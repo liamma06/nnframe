@@ -3,6 +3,7 @@
 #include "core/tensor.h"
 #include "infer/kv_cache.h"
 #include "infer/paged_kv_cache.h"
+#include "infer/kv_block_pool.h"
 #include "modules/attention.h"
 #include "infer/sampler.h"
 #include "modules/char_model.h"
@@ -278,4 +279,79 @@ TEST_CASE("CharModel::generate - top_k=1 matches argmax from plain non-cached fo
 
     CHECK(result.size() == prompt.size() + 1);
     CHECK(result.back() == expected_argmax);
+}
+
+TEST_CASE("KVBlockPool: two interleaved sequences don't corrupt each other, match independent PagedKVCache") {
+    size_t heads = 2, head_dim = 3, block_size = 4;
+
+    std::mt19937 rng(101);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    auto make_chunk = [&](size_t seq_len) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        return std::make_pair(
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data),
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data)
+        );
+    };
+
+    // seq0: prefill 5, then 2 decode steps (spans multiple blocks, block_size=4)
+    // seq1: prefill 3, then 2 decode steps
+    auto seq0_chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(5), make_chunk(1), make_chunk(1)};
+    auto seq1_chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(3), make_chunk(1), make_chunk(1)};
+
+    // ground truth: each sequence gets its own independent, already-tested PagedKVCache
+    PagedKVCache ref0(heads, head_dim, /*max_seq_len=*/16, block_size);
+    PagedKVCache ref1(heads, head_dim, /*max_seq_len=*/16, block_size);
+
+    // shared pool: enough blocks for both sequences (seq0 needs 2, seq1 needs 2 -> 4 total, give headroom)
+    KVBlockPool pool(heads, head_dim, /*max_blocks=*/8, block_size);
+    size_t seq0_id = 0, seq1_id = 1;
+
+    // interleave appends across the two sequences, exercising that they don't stomp on each other
+    for (size_t i = 0; i < seq0_chunks.size(); i++) {
+        ref0.append(seq0_chunks[i].first, seq0_chunks[i].second);
+        pool.append(seq0_id, seq0_chunks[i].first, seq0_chunks[i].second);
+
+        ref1.append(seq1_chunks[i].first, seq1_chunks[i].second);
+        pool.append(seq1_id, seq1_chunks[i].first, seq1_chunks[i].second);
+    }
+
+    TensorPtr k0_ref = ref0.get_k(), v0_ref = ref0.get_v();
+    TensorPtr k0_pool = pool.get_k(seq0_id), v0_pool = pool.get_v(seq0_id);
+    TensorPtr k1_ref = ref1.get_k(), v1_ref = ref1.get_v();
+    TensorPtr k1_pool = pool.get_k(seq1_id), v1_pool = pool.get_v(seq1_id);
+
+    REQUIRE(k0_pool->shape() == k0_ref->shape());
+    REQUIRE(k1_pool->shape() == k1_ref->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k0_ref->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k0_pool->at({h, i, j}) == doctest::Approx(k0_ref->at({h, i, j})));
+                CHECK(v0_pool->at({h, i, j}) == doctest::Approx(v0_ref->at({h, i, j})));
+            }
+        }
+        for (size_t i = 0; i < k1_ref->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k1_pool->at({h, i, j}) == doctest::Approx(k1_ref->at({h, i, j})));
+                CHECK(v1_pool->at({h, i, j}) == doctest::Approx(v1_ref->at({h, i, j})));
+            }
+        }
+    }
+}
+
+TEST_CASE("KVBlockPool: throws when the pool runs out of blocks") {
+    KVBlockPool pool(/*num_heads=*/1, /*head_dim=*/2, /*max_blocks=*/1, /*block_size=*/2);
+
+    auto k1 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
+    auto v1 = std::make_shared<Tensor>(std::vector<size_t>{1, 2, 2}, std::vector<scalar_t>{1,2, 3,4});
+    pool.append(0, k1, v1); // fills the only block
+
+    auto k2 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
+    auto v2 = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{5, 6});
+    CHECK_THROWS_AS(pool.append(0, k2, v2), std::runtime_error);
 }

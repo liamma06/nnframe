@@ -19,6 +19,8 @@
 #include "optim/adamw.h"
 #include "optim/grad_clip.h"
 #include "infer/kv_cache.h"
+#include "infer/paged_kv_cache.h"
+#include "infer/kv_block_pool.h"
 #include <vector>
 #include <random>
 #include <stdexcept>
@@ -1536,6 +1538,107 @@ TEST_CASE("CUDA KVCache::grow (via append) matches CPU across multiple appends")
             for (size_t k = 0; k < head_dim; k++) {
                 CHECK(k_gpu_host->at({i, j, k}) == doctest::Approx(k_cpu->at({i, j, k})));
                 CHECK(v_gpu_host->at({i, j, k}) == doctest::Approx(v_cpu->at({i, j, k})));
+            }
+        }
+    }
+}
+
+TEST_CASE("CUDA PagedKVCache matches CPU PagedKVCache across prefill + multiple decode steps") {
+    size_t heads = 3, head_dim = 4;
+    std::vector<size_t> chunk_seq_lens = {4, 1, 1, 1}; // prefill of 4, then 3 decode steps
+
+    std::mt19937 rng(29);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<TensorPtr> k_chunks_cpu, v_chunks_cpu;
+    for (size_t seq_len : chunk_seq_lens) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        k_chunks_cpu.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data));
+        v_chunks_cpu.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data));
+    }
+
+    PagedKVCache cpu_cache(heads, head_dim, /*max_seq_len=*/16, /*block_size=*/4, Device::CPU);
+    for (size_t i = 0; i < k_chunks_cpu.size(); i++) cpu_cache.append(k_chunks_cpu[i], v_chunks_cpu[i]);
+
+    PagedKVCache cuda_cache(heads, head_dim, /*max_seq_len=*/16, /*block_size=*/4, Device::CUDA);
+    for (size_t i = 0; i < k_chunks_cpu.size(); i++) {
+        cuda_cache.append(k_chunks_cpu[i]->to(Device::CUDA), v_chunks_cpu[i]->to(Device::CUDA));
+    }
+
+    TensorPtr k_cpu = cpu_cache.get_k();
+    TensorPtr v_cpu = cpu_cache.get_v();
+    TensorPtr k_gpu_host = cuda_cache.get_k()->to(Device::CPU);
+    TensorPtr v_gpu_host = cuda_cache.get_v()->to(Device::CPU);
+
+    REQUIRE(k_gpu_host->shape() == k_cpu->shape());
+    REQUIRE(v_gpu_host->shape() == v_cpu->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k_cpu->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k_gpu_host->at({h, i, j}) == doctest::Approx(k_cpu->at({h, i, j})));
+                CHECK(v_gpu_host->at({h, i, j}) == doctest::Approx(v_cpu->at({h, i, j})));
+            }
+        }
+    }
+}
+
+TEST_CASE("CUDA KVBlockPool matches CPU KVBlockPool across two interleaved sequences") {
+    size_t heads = 2, head_dim = 3, block_size = 4;
+
+    std::mt19937 rng(211);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    auto make_chunk = [&](size_t seq_len) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        return std::make_pair(
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data),
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data)
+        );
+    };
+
+    // seq0: prefill 5, then 2 decode steps (spans multiple blocks, block_size=4)
+    // seq1: prefill 3, then 2 decode steps
+    auto seq0_chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(5), make_chunk(1), make_chunk(1)};
+    auto seq1_chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(3), make_chunk(1), make_chunk(1)};
+
+    KVBlockPool cpu_pool(heads, head_dim, /*max_blocks=*/8, block_size, Device::CPU);
+    KVBlockPool cuda_pool(heads, head_dim, /*max_blocks=*/8, block_size, Device::CUDA);
+    size_t seq0_id = 0, seq1_id = 1;
+
+    for (size_t i = 0; i < seq0_chunks.size(); i++) {
+        cpu_pool.append(seq0_id, seq0_chunks[i].first, seq0_chunks[i].second);
+        cuda_pool.append(seq0_id, seq0_chunks[i].first->to(Device::CUDA), seq0_chunks[i].second->to(Device::CUDA));
+
+        cpu_pool.append(seq1_id, seq1_chunks[i].first, seq1_chunks[i].second);
+        cuda_pool.append(seq1_id, seq1_chunks[i].first->to(Device::CUDA), seq1_chunks[i].second->to(Device::CUDA));
+    }
+
+    TensorPtr k0_cpu = cpu_pool.get_k(seq0_id), v0_cpu = cpu_pool.get_v(seq0_id);
+    TensorPtr k0_gpu = cuda_pool.get_k(seq0_id)->to(Device::CPU), v0_gpu = cuda_pool.get_v(seq0_id)->to(Device::CPU);
+    TensorPtr k1_cpu = cpu_pool.get_k(seq1_id), v1_cpu = cpu_pool.get_v(seq1_id);
+    TensorPtr k1_gpu = cuda_pool.get_k(seq1_id)->to(Device::CPU), v1_gpu = cuda_pool.get_v(seq1_id)->to(Device::CPU);
+
+    REQUIRE(k0_gpu->shape() == k0_cpu->shape());
+    REQUIRE(k1_gpu->shape() == k1_cpu->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k0_cpu->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k0_gpu->at({h, i, j}) == doctest::Approx(k0_cpu->at({h, i, j})));
+                CHECK(v0_gpu->at({h, i, j}) == doctest::Approx(v0_cpu->at({h, i, j})));
+            }
+        }
+        for (size_t i = 0; i < k1_cpu->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k1_gpu->at({h, i, j}) == doctest::Approx(k1_cpu->at({h, i, j})));
+                CHECK(v1_gpu->at({h, i, j}) == doctest::Approx(v1_cpu->at({h, i, j})));
             }
         }
     }

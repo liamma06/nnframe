@@ -23,6 +23,7 @@ add_library(nnframe_core STATIC
     src/transformer_block.cpp
     src/KVCache/KVCache.cpp
     src/KVCache/PagedKVCache.cpp
+    src/KVCache/KVBlockPool.cpp
     src/sampler.cpp
 )
 target_include_directories(nnframe_core PUBLIC include)
@@ -87,6 +88,7 @@ if(NNFRAME_WITH_CUDA)
         src/transformer_block.cpp
         src/KVCache/KVCache.cpp
     src/KVCache/PagedKVCache.cpp
+    src/KVCache/KVBlockPool.cpp
         src/sampler.cpp
         src/cuda/matmul_cuda.cu
         src/cuda/elementwise_cuda.cu
