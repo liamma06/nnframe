@@ -106,3 +106,37 @@ TEST_CASE("adamw zero_grad clears gradients") {
     CHECK(w->grad().data()[0] == doctest::Approx(0.0f));
     CHECK(w->grad().data()[1] == doctest::Approx(0.0f));
 }
+
+TEST_CASE("backward(scale) seeds the gradient at scale instead of 1.0") {
+    // y = w^2, dy/dw = 2w = 6.0 at w=3; loss-scaled by 1024 -> 6144.0
+    auto w = Tensor::create({2}, 3.0f);
+    w->set_requires_grad(true);
+    auto y = w->mul(w);
+    y->backward(1024.0f);
+
+    CHECK(w->grad().data()[0] == doctest::Approx(6144.0f));
+    CHECK(w->grad().data()[1] == doctest::Approx(6144.0f));
+}
+
+TEST_CASE("loss-scaled AdamW step matches an unscaled step") {
+    // same starting weight, same computation graph -- only difference is loss scaling.
+    // AdamW should unscale internally and land on the exact same updated weight either way.
+    auto w_plain = Tensor::create({1}, 2.0f);
+    w_plain->set_requires_grad(true);
+    auto y_plain = w_plain->mul(w_plain);
+    y_plain->backward(); // scale = 1.0 (default)
+
+    auto w_scaled = Tensor::create({1}, 2.0f);
+    w_scaled->set_requires_grad(true);
+    auto y_scaled = w_scaled->mul(w_scaled);
+    y_scaled->backward(1024.0f);
+
+    AdamW optim_plain({w_plain}, 0.1f, 0.9f, 0.999f, 1e-8f, 0.0f);
+    optim_plain.step();
+
+    AdamW optim_scaled({w_scaled}, 0.1f, 0.9f, 0.999f, 1e-8f, 0.0f);
+    optim_scaled.set_loss_scale(1024.0f);
+    optim_scaled.step();
+
+    CHECK(w_scaled->data()[0] == doctest::Approx(w_plain->data()[0]));
+}
