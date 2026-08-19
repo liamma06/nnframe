@@ -22,6 +22,7 @@ add_library(nnframe_core STATIC
     src/attention.cpp
     src/transformer_block.cpp
     src/KVCache/KVCache.cpp
+    src/KVCache/PagedKVCache.cpp
     src/sampler.cpp
 )
 target_include_directories(nnframe_core PUBLIC include)
@@ -85,6 +86,7 @@ if(NNFRAME_WITH_CUDA)
         src/attention.cpp
         src/transformer_block.cpp
         src/KVCache/KVCache.cpp
+    src/KVCache/PagedKVCache.cpp
         src/sampler.cpp
         src/cuda/matmul_cuda.cu
         src/cuda/elementwise_cuda.cu

@@ -2,9 +2,12 @@
 #include "doctest.h"
 #include "core/tensor.h"
 #include "infer/kv_cache.h"
+#include "infer/paged_kv_cache.h"
 #include "modules/attention.h"
 #include "infer/sampler.h"
 #include "modules/char_model.h"
+#include <random>
+#include <stdexcept>
 
 namespace {
     // pulls out rows [start, start+count) as a fresh [count, embed_dim] tensor
@@ -100,6 +103,59 @@ TEST_CASE("KVCache: prefill (multi-token) then decode (single-token) grows corre
     CHECK(v2->at({1, 2, 1}) == 6000.0f);  // old v preserved
     CHECK(v2->at({0, 3, 0}) == 700.0f);   // new v appended
     CHECK(v2->at({1, 3, 1}) == 8000.0f);  // new v appended
+}
+
+TEST_CASE("PagedKVCache matches naive KVCache across prefill + multiple decode steps") {
+    size_t heads = 2, head_dim = 3;
+    std::vector<size_t> chunk_seq_lens = {4, 1, 1, 1}; // prefill of 4, then 3 decode steps
+
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<TensorPtr> k_chunks, v_chunks;
+    for (size_t seq_len : chunk_seq_lens) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        k_chunks.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data));
+        v_chunks.push_back(std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data));
+    }
+
+    KVCache naive_cache;
+    for (size_t i = 0; i < k_chunks.size(); i++) naive_cache.append(k_chunks[i], v_chunks[i]);
+
+    PagedKVCache paged_cache(heads, head_dim, /*max_seq_len=*/16, /*block_size=*/4);
+    for (size_t i = 0; i < k_chunks.size(); i++) paged_cache.append(k_chunks[i], v_chunks[i]);
+
+    TensorPtr k_naive = naive_cache.get_k();
+    TensorPtr v_naive = naive_cache.get_v();
+    TensorPtr k_paged = paged_cache.get_k();
+    TensorPtr v_paged = paged_cache.get_v();
+
+    REQUIRE(k_paged->shape() == k_naive->shape());
+    REQUIRE(v_paged->shape() == v_naive->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k_naive->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                CHECK(k_paged->at({h, i, j}) == doctest::Approx(k_naive->at({h, i, j})));
+                CHECK(v_paged->at({h, i, j}) == doctest::Approx(v_naive->at({h, i, j})));
+            }
+        }
+    }
+}
+
+TEST_CASE("PagedKVCache throws when appending past capacity") {
+    PagedKVCache cache(/*num_heads=*/1, /*head_dim=*/2, /*max_seq_len=*/4, /*block_size=*/4);
+
+    auto k = std::make_shared<Tensor>(std::vector<size_t>{1, 4, 2}, std::vector<scalar_t>{1,2, 3,4, 5,6, 7,8});
+    auto v = std::make_shared<Tensor>(std::vector<size_t>{1, 4, 2}, std::vector<scalar_t>{1,2, 3,4, 5,6, 7,8});
+    cache.append(k, v); // fills exactly to capacity (4), should be fine
+
+    auto k_overflow = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{9, 10});
+    auto v_overflow = std::make_shared<Tensor>(std::vector<size_t>{1, 1, 2}, std::vector<scalar_t>{9, 10});
+    CHECK_THROWS_AS(cache.append(k_overflow, v_overflow), std::runtime_error);
 }
 
 TEST_CASE("SelfAttention: cached prefill+decode matches plain full-sequence forward") {
