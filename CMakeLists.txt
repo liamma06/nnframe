@@ -45,6 +45,10 @@ add_executable(test_m4 tests/test_m4_loss_optim.cpp)
 target_include_directories(test_m4 PRIVATE tests)
 target_link_libraries(test_m4 PRIVATE nnframe_core)
 
+add_executable(test_m10_bf16 tests/test_m10_bf16.cpp)
+target_include_directories(test_m10_bf16 PRIVATE tests)
+target_link_libraries(test_m10_bf16 PRIVATE nnframe_core)
+
 add_executable(xor examples/xor.cpp)
 target_link_libraries(xor PRIVATE nnframe_core)
 
