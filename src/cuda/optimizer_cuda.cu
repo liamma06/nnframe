@@ -1,11 +1,11 @@
 #include "cuda/optimizer_cuda.cuh"
 #include <vector>
 
-__global__ void adamw_kernel(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2) {
+__global__ void adamw_kernel(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2, scalar_t inv_scale) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < param_size){
-        scalar_t grad = d_grad[idx];
+        scalar_t grad = d_grad[idx] * inv_scale;
         scalar_t m = d_m[idx];
         scalar_t v = d_v[idx];
 
@@ -23,12 +23,12 @@ __global__ void adamw_kernel(scalar_t* d_param, const scalar_t* d_grad, scalar_t
 }
 
 
-void adamw_cuda(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2) {
+void adamw_cuda(scalar_t* d_param, const scalar_t* d_grad, scalar_t* d_m, scalar_t* d_v, size_t param_size, scalar_t lr, scalar_t beta1, scalar_t beta2, scalar_t eps, scalar_t weight_decay, scalar_t bias_correction1, scalar_t bias_correction2, scalar_t inv_scale) {
     dim3 blockDim(256);
 
-    //atleast each param gets one thread 
+    //atleast each param gets one thread
     size_t gridDim = (param_size + blockDim.x - 1) / blockDim.x;
-    adamw_kernel<<<gridDim, blockDim>>>(d_param, d_grad, d_m, d_v, param_size, lr, beta1, beta2, eps, weight_decay, bias_correction1, bias_correction2);
+    adamw_kernel<<<gridDim, blockDim>>>(d_param, d_grad, d_m, d_v, param_size, lr, beta1, beta2, eps, weight_decay, bias_correction1, bias_correction2, inv_scale);
     CUDA_CHECK(cudaGetLastError());
 
 }

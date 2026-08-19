@@ -1067,16 +1067,16 @@ void Tensor::init_grad() {
 void Tensor::set_inputs(std::vector<TensorPtr> inputs) { inputs_ = inputs; }
 Tensor& Tensor::grad() { return *grad_; }
 
-void Tensor::backward(){
+void Tensor::backward(scalar_t scale){
 
-    //inital gradient just 1
+    //initial gradient is `scale` 
     if (device_ == Device::CPU){
-        grad_ = Tensor::create(shape_, 1.0f);
+        grad_ = Tensor::create(shape_, scale);
     }
     #ifdef NNFRAME_WITH_CUDA
     else if (device_ == Device::CUDA){
         size_t n = numel();
-        std::vector<scalar_t> ones(n, 1.0f);
+        std::vector<scalar_t> ones(n, scale);
         scalar_t* d_grad = nullptr;
         CUDA_CHECK(cudaMallocAsync(&d_grad, n * sizeof(scalar_t), 0));
         CUDA_CHECK(cudaMemcpy(d_grad, ones.data(), n * sizeof(scalar_t), cudaMemcpyHostToDevice));

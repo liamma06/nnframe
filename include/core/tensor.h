@@ -81,7 +81,7 @@ class Tensor : public std::enable_shared_from_this<Tensor> {
         void set_grad_fn(std::function<void(const Tensor&)> gradfn);
         void set_inputs(std::vector<TensorPtr> inputs);
         void init_grad(); // initialize grad_ to zeros if not already set
-        void backward();
+        void backward(scalar_t scale = 1.0f); // scale seeds (loss scaling)
 
         std::vector<scalar_t>& mutable_data(); //return reference to data vector so it can be modified
 

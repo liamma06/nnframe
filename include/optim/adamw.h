@@ -32,7 +32,9 @@ class AdamW{
         #endif
 
         size_t t_; //time step
-    
+
+        scalar_t loss_scale_ = 1.0f; // unscale the loss since optimizer need full value
+
     public:
         AdamW(std::vector<TensorPtr> params, float lr, float beta1 = 0.9f, float beta2 = 0.999f, float epsilon = 1e-8f, float weight_decay = 0.01f)
             : params_(params), lr_(lr), beta1_(beta1), beta2_(beta2), epsilon_(epsilon), weight_decay_(weight_decay), t_(0) {
@@ -82,10 +84,13 @@ class AdamW{
             #endif
         }
 
+        void set_loss_scale(scalar_t loss_scale) { loss_scale_ = loss_scale; }
+
         void step() {
             t_++;
             scalar_t bias_correction1 = 1.0f - std::pow(beta1_, static_cast<scalar_t>(t_));
             scalar_t bias_correction2 = 1.0f - std::pow(beta2_, static_cast<scalar_t>(t_));
+            scalar_t inv_scale = 1.0f / loss_scale_; //unscale 
 
             for (size_t i = 0; i < params_.size(); ++i) {
                 if (!params_[i]->requires_grad()) continue;
@@ -94,7 +99,7 @@ class AdamW{
                     if (params_[i]->device() == Device::CUDA) {
                         adamw_cuda(params_[i]->mutable_device_data(), params_[i]->grad().device_data(),
                                     d_m_[i], d_v_[i], params_[i]->numel(),
-                                   lr_, beta1_, beta2_, epsilon_, weight_decay_, bias_correction1, bias_correction2);
+                                   lr_, beta1_, beta2_, epsilon_, weight_decay_, bias_correction1, bias_correction2, inv_scale);
                         continue;
                     }
                 #endif
@@ -102,10 +107,11 @@ class AdamW{
                 auto& param_data = params_[i]->mutable_data();
                 auto& param_grad = params_[i]->grad().mutable_data();
                 for (size_t j = 0; j < param_data.size(); ++j) {
+                    scalar_t grad = param_grad[j] * inv_scale;
                     // Update biased first moment estimate
-                    m_[i][j] = beta1_ * m_[i][j] + (1 - beta1_) * param_grad[j];
+                    m_[i][j] = beta1_ * m_[i][j] + (1 - beta1_) * grad;
                     // Update biased second first moment estimate
-                    v_[i][j] = beta2_ * v_[i][j] + (1 - beta2_) * (param_grad[j] * param_grad[j]);
+                    v_[i][j] = beta2_ * v_[i][j] + (1 - beta2_) * (grad * grad);
                     // Compute bias correct first moment estimate
                     scalar_t m_hat = m_[i][j] / bias_correction1;
                     // Compute bias correct second first moment estimate
