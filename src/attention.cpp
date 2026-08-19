@@ -187,7 +187,7 @@ TensorPtr SelfAttention::forward(const TensorPtr& input){
     return output;
 }
 
-TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
+TensorPtr SelfAttention::forward(const TensorPtr& input, KVBlockPool& kv_pool, size_t sequence_id){
     /*
         Same forward but KV Cache used 
         1. compute new K and V from input
@@ -208,10 +208,10 @@ TensorPtr SelfAttention::forward(const TensorPtr& input, KVCache& kv_cache){
     TensorPtr K_split = K->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
     TensorPtr V_split = V->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2});
 
-    kv_cache.append(K_split, V_split);
+    kv_pool.append(sequence_id, K_split, V_split);
 
-    TensorPtr full_K = kv_cache.get_k();
-    TensorPtr full_V = kv_cache.get_v();
+    TensorPtr full_K = kv_pool.get_k(sequence_id);
+    TensorPtr full_V = kv_pool.get_v(sequence_id);
 
 
     TensorPtr Q_split = Q->reshape({input->shape()[0],num_heads_,  head_dim_})->permute({1, 0, 2})->contiguous();

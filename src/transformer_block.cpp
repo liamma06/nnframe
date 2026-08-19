@@ -79,12 +79,12 @@ TensorPtr TransformerBlock::forward(const TensorPtr& input){
     return output;
 }
 
-TensorPtr TransformerBlock::forward(const TensorPtr& input, KVCache& kv_cache){
+TensorPtr TransformerBlock::forward(const TensorPtr& input, KVBlockPool& kv_pool, size_t sequence_id){
     /*
-        Same as above but pass in KVCache to attention
+        Same as above but pass in KVBlockPool to attention
     */
     TensorPtr pre_norm_input = layer_norm1_.forward(input);
-    TensorPtr attn_output = self_attention_.forward(pre_norm_input, kv_cache);
+    TensorPtr attn_output = self_attention_.forward(pre_norm_input, kv_pool, sequence_id);
     TensorPtr residual1 = attn_output->add(input);
     TensorPtr pre_norm2 = layer_norm2_.forward(residual1);
     

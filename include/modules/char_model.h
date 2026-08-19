@@ -105,29 +105,26 @@ class CharModel : public Layer{
             return lm_head_.forward(x);
         }
 
-        TensorPtr forward(const TensorPtr& input, std::vector<KVCache>& kv_caches){
+        TensorPtr forward(const TensorPtr& input, std::vector<KVBlockPool>& kv_pools, size_t sequence_id, size_t start_pos){
             /*
-                -same as above but pass in KVCache 
+                -same as above but pass in KVBlockPool
                 -used for prefill and decode (inference)
-                -track token for the position forward
+                -start_pos: how many tokens already generated for this sequence
             */
 
-            assert(kv_caches.size() == transformer_blocks_.size() && "must have one KVCache per transformer block");
+            assert(kv_pools.size() == transformer_blocks_.size() && "must have one KVBlockPool per transformer block");
 
             TensorPtr x = embedding_layer_.forward(input);
 
-            
-
-            size_t start_pos = kv_caches[0].get_k() ? kv_caches[0].get_k()->shape()[1] : 0;
             x = positional_embedding_layer_.forward(x, start_pos);
 
-            //represent change in the embeddings (each gets thier own KVCache)
+            //represent change in the embeddings (each gets thier own KVBlockPool)
             for (size_t i = 0; i < transformer_blocks_.size(); i++){
-                x = transformer_blocks_[i].forward(x, kv_caches[i]);
+                x = transformer_blocks_[i].forward(x, kv_pools[i], sequence_id);
             }
 
             //use those embeddings to get logits which go into the sampler to find next token!
-            return lm_head_.forward(x); 
+            return lm_head_.forward(x);
         }
 
 
@@ -138,18 +135,30 @@ class CharModel : public Layer{
             */
             assert(max_new_tokens >= 1 && "max_new_tokens must be at least 1");
 
-            std::vector<KVCache> kv_caches(transformer_blocks_.size()); 
+            // one shared block pool per transformer block
+            size_t head_dim = embedding_dim_ / num_heads_;
+            size_t block_size = 16;
+            size_t total_len = prompt.size() + max_new_tokens;
+            size_t max_blocks = (total_len + block_size - 1) / block_size;
+
+            std::vector<KVBlockPool> kv_pools;
+            for (size_t i = 0; i < transformer_blocks_.size(); i++){
+                kv_pools.emplace_back(num_heads_, head_dim, max_blocks, block_size);
+            }
+            size_t sequence_id = 0; // one sequence per generate() call
+            size_t start_pos = 0;
 
             std::vector<scalar_t> prompt_data;
             for (size_t id : prompt){ //int -> float
                 prompt_data.push_back(static_cast<scalar_t>(id));
             }
 
-            //basic tensor with the prompt ids 
+            //basic tensor with the prompt ids
             auto prompt_tensor = Tensor::from_vector(prompt_data);
 
-            //prefill the KVCache with the prompt
-            auto logits = forward(prompt_tensor, kv_caches);
+            //prefill the KVBlockPool with the prompt
+            auto logits = forward(prompt_tensor, kv_pools, sequence_id, start_pos);
+            start_pos += prompt.size();
 
             //logits of the "prediction" send to sampler for next token id
             auto last_logits = extract_row(logits, logits->shape()[0] - 1);
@@ -162,7 +171,8 @@ class CharModel : public Layer{
             for (size_t i = 0; i < max_new_tokens - 1; i++){
                 auto new_token_tensor = Tensor::from_vector({static_cast<scalar_t>(next_token_id)});
 
-                logits = forward(new_token_tensor, kv_caches);
+                logits = forward(new_token_tensor, kv_pools, sequence_id, start_pos);
+                start_pos += 1;
 
                 last_logits = extract_row(logits, logits->shape()[0] - 1);
                 next_token_id = sampler.sample(last_logits, temperature, top_k);
@@ -173,7 +183,7 @@ class CharModel : public Layer{
 
             return generated_tokens;
 
-        }   
+        }
 
 
 };

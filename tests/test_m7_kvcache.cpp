@@ -174,9 +174,10 @@ TEST_CASE("SelfAttention: cached prefill+decode matches plain full-sequence forw
     auto ground_truth = attn.forward(x_full);
 
     // cached: prefill first 3 tokens, then decode tokens 3 and 4 one at a time
-    KVCache cache;
+    KVBlockPool pool(num_heads, embed_dim / num_heads, /*max_blocks=*/4, /*block_size=*/4);
+    size_t sequence_id = 0;
     auto x_prefill = extract_rows(x_full, 0, 3, embed_dim);
-    auto prefill_out = attn.forward(x_prefill, cache);
+    auto prefill_out = attn.forward(x_prefill, pool, sequence_id);
 
     CHECK(prefill_out->shape()[0] == 3);
     for (size_t i = 0; i < 3; i++)
@@ -184,13 +185,13 @@ TEST_CASE("SelfAttention: cached prefill+decode matches plain full-sequence forw
             CHECK(prefill_out->at({i, j}) == doctest::Approx(ground_truth->at({i, j})).epsilon(1e-4));
 
     auto x_tok3 = extract_rows(x_full, 3, 1, embed_dim);
-    auto decode_out3 = attn.forward(x_tok3, cache);
+    auto decode_out3 = attn.forward(x_tok3, pool, sequence_id);
     CHECK(decode_out3->shape()[0] == 1);
     for (size_t j = 0; j < embed_dim; j++)
         CHECK(decode_out3->at({0, j}) == doctest::Approx(ground_truth->at({3, j})).epsilon(1e-4));
 
     auto x_tok4 = extract_rows(x_full, 4, 1, embed_dim);
-    auto decode_out4 = attn.forward(x_tok4, cache);
+    auto decode_out4 = attn.forward(x_tok4, pool, sequence_id);
     CHECK(decode_out4->shape()[0] == 1);
     for (size_t j = 0; j < embed_dim; j++)
         CHECK(decode_out4->at({0, j}) == doctest::Approx(ground_truth->at({4, j})).epsilon(1e-4));
