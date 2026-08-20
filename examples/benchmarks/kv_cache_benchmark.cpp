@@ -1,6 +1,6 @@
 #include "core/tensor.h"
 #include "modules/attention.h"
-#include "infer/kv_cache.h"
+#include "infer/kv_block_pool.h"
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -54,11 +54,15 @@ int main() {
     auto end_no_cache = std::chrono::high_resolution_clock::now();
 
     // --- with KV cache: each step only processes the single new token ---
+    const size_t block_size = 16;
+    const size_t max_blocks = (num_tokens + block_size - 1) / block_size;
+    const size_t sequence_id = 0;
+
     auto start_cache = std::chrono::high_resolution_clock::now();
-    KVCache cache;
-    attn.forward(tokens[0], cache);
+    KVBlockPool pool(num_heads, embed_dim / num_heads, max_blocks, block_size);
+    attn.forward(tokens[0], pool, sequence_id);
     for (size_t i = 1; i < num_tokens; i++) {
-        attn.forward(tokens[i], cache);
+        attn.forward(tokens[i], pool, sequence_id);
     }
     auto end_cache = std::chrono::high_resolution_clock::now();
 
