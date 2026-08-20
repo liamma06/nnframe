@@ -76,6 +76,9 @@ target_link_libraries(test_m7 PRIVATE nnframe_core)
 add_executable(kv_cache_benchmark examples/benchmarks/kv_cache_benchmark.cpp)
 target_link_libraries(kv_cache_benchmark PRIVATE nnframe_core)
 
+add_executable(kv_int8_quant_benchmark examples/benchmarks/kv_int8_quant_benchmark.cpp)
+target_link_libraries(kv_int8_quant_benchmark PRIVATE nnframe_core)
+
 add_executable(matmul_benchmark examples/benchmarks/matmul_benchmark.cpp)
 target_link_libraries(matmul_benchmark PRIVATE nnframe_core)
 

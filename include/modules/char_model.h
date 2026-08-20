@@ -128,7 +128,7 @@ class CharModel : public Layer{
         }
 
 
-        std::vector<size_t> generate(const std::vector<size_t>& prompt, Sampler& sampler, size_t max_new_tokens, float temperature, size_t top_k){
+        std::vector<size_t> generate(const std::vector<size_t>& prompt, Sampler& sampler, size_t max_new_tokens, float temperature, size_t top_k, bool use_quantized_kv_cache = false){
             /*
                 input prompt -> vector of token IDs
                 output -> vector of token IDs (prompt + generated tokens)
@@ -143,7 +143,7 @@ class CharModel : public Layer{
 
             std::vector<KVBlockPool> kv_pools;
             for (size_t i = 0; i < transformer_blocks_.size(); i++){
-                kv_pools.emplace_back(num_heads_, head_dim, max_blocks, block_size);
+                kv_pools.emplace_back(num_heads_, head_dim, max_blocks, block_size, Device::CPU, use_quantized_kv_cache);
             }
             size_t sequence_id = 0; // one sequence per generate() call
             size_t start_pos = 0;
