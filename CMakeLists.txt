@@ -24,6 +24,7 @@ add_library(nnframe_core STATIC
     src/KVCache/KVCache.cpp
     src/KVCache/PagedKVCache.cpp
     src/KVCache/KVBlockPool.cpp
+    src/KVCache/int8Quant.cpp
     src/sampler.cpp
 )
 target_include_directories(nnframe_core PUBLIC include)
@@ -50,6 +51,10 @@ target_link_libraries(test_m4 PRIVATE nnframe_core)
 add_executable(test_m10_bf16 tests/test_m10_bf16.cpp)
 target_include_directories(test_m10_bf16 PRIVATE tests)
 target_link_libraries(test_m10_bf16 PRIVATE nnframe_core)
+
+add_executable(test_m10_int8_quant tests/test_m10_int8_quant.cpp)
+target_include_directories(test_m10_int8_quant PRIVATE tests)
+target_link_libraries(test_m10_int8_quant PRIVATE nnframe_core)
 
 add_executable(xor examples/xor.cpp)
 target_link_libraries(xor PRIVATE nnframe_core)
@@ -89,6 +94,7 @@ if(NNFRAME_WITH_CUDA)
         src/KVCache/KVCache.cpp
     src/KVCache/PagedKVCache.cpp
     src/KVCache/KVBlockPool.cpp
+    src/KVCache/int8Quant.cpp
         src/sampler.cpp
         src/cuda/matmul_cuda.cu
         src/cuda/elementwise_cuda.cu
@@ -100,6 +106,7 @@ if(NNFRAME_WITH_CUDA)
         src/cuda/attention_cuda.cu
         src/cuda/linear_cuda.cu
         src/cuda/pos_embed_cuda.cu
+        src/cuda/int8_quant_cuda.cu
         src/cuda/mempool.cu
     )
     target_include_directories(nnframe_core_cuda PUBLIC include)

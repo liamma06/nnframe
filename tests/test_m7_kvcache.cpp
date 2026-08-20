@@ -345,6 +345,51 @@ TEST_CASE("KVBlockPool: two interleaved sequences don't corrupt each other, matc
     }
 }
 
+TEST_CASE("KVBlockPool: quantized pool matches unquantized pool within int8 error") {
+    size_t heads = 2, head_dim = 3, block_size = 4;
+
+    std::mt19937 rng(202);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    auto make_chunk = [&](size_t seq_len) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        return std::make_pair(
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data),
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data)
+        );
+    };
+
+    // prefill 5 (spans 2 blocks), then 2 decode steps
+    auto chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(5), make_chunk(1), make_chunk(1)};
+
+    KVBlockPool plain_pool(heads, head_dim, /*max_blocks=*/8, block_size);
+    KVBlockPool quant_pool(heads, head_dim, /*max_blocks=*/8, block_size, Device::CPU, /*use_quantization=*/true);
+    size_t seq_id = 0;
+
+    for (auto& chunk : chunks) {
+        plain_pool.append(seq_id, chunk.first, chunk.second);
+        quant_pool.append(seq_id, chunk.first, chunk.second);
+    }
+
+    TensorPtr k_plain = plain_pool.get_k(seq_id), v_plain = plain_pool.get_v(seq_id);
+    TensorPtr k_quant = quant_pool.get_k(seq_id), v_quant = quant_pool.get_v(seq_id);
+
+    REQUIRE(k_quant->shape() == k_plain->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k_plain->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                // int8 with per-token scale: worst-case error is scale ~= max_abs/127, values are in [-1, 1]
+                CHECK(std::fabs(k_quant->at({h, i, j}) - k_plain->at({h, i, j})) < 0.02f);
+                CHECK(std::fabs(v_quant->at({h, i, j}) - v_plain->at({h, i, j})) < 0.02f);
+            }
+        }
+    }
+}
+
 TEST_CASE("KVBlockPool: evicts the least-recently-used sequence's block when full") {
     // 1 block total -- sequence 0 fills it, then sequence 1 needs a block and must evict it
     KVBlockPool pool(/*num_heads=*/1, /*head_dim=*/2, /*max_blocks=*/1, /*block_size=*/2);

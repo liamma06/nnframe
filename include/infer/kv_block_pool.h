@@ -1,5 +1,6 @@
 #pragma once
 #include "core/tensor.h"
+#include "infer/int8_quant.h"
 #include <unordered_map>
 #include <list>
 
@@ -8,11 +9,23 @@ class KVBlockPool {
         TensorPtr pool_k_;
         TensorPtr pool_v_;
 
+        // CPU storage:
+        std::vector<int8_t> pool_k_i8_;
+        std::vector<int8_t> pool_v_i8_;
+        std::vector<float> token_scales_k_;
+        std::vector<float> token_scales_v_;
+        // CUDA storage (device pointers, same layout):
+        int8_t* pool_k_i8_dev_ = nullptr;
+        int8_t* pool_v_i8_dev_ = nullptr;
+        float* token_scales_k_dev_ = nullptr;
+        float* token_scales_v_dev_ = nullptr;
+
         size_t num_heads_;
         size_t head_dim_;
-        size_t block_size_; 
-        size_t max_blocks_; 
+        size_t block_size_;
+        size_t max_blocks_;
         Device device_;
+        bool use_quantization_;
 
         std::vector<size_t> free_blocks_;
 
@@ -38,7 +51,7 @@ class KVBlockPool {
 
     public:
 
-    KVBlockPool(size_t num_heads, size_t head_dim, size_t max_blocks, size_t block_size = 16, Device device = Device::CPU);
+    KVBlockPool(size_t num_heads, size_t head_dim, size_t max_blocks, size_t block_size = 16, Device device = Device::CPU, bool use_quantization = false);
 
     void append(size_t sequence_id, const TensorPtr& k, const TensorPtr& v);
     TensorPtr get_k(size_t sequence_id) const;

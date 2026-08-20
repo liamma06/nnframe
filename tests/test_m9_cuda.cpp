@@ -1644,6 +1644,52 @@ TEST_CASE("CUDA KVBlockPool matches CPU KVBlockPool across two interleaved seque
     }
 }
 
+TEST_CASE("CUDA KVBlockPool quantized matches CPU KVBlockPool quantized within int8 error") {
+    size_t heads = 2, head_dim = 3, block_size = 4;
+
+    std::mt19937 rng(212);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    auto make_chunk = [&](size_t seq_len) {
+        std::vector<scalar_t> k_data(heads * seq_len * head_dim);
+        std::vector<scalar_t> v_data(heads * seq_len * head_dim);
+        for (auto& x : k_data) x = dist(rng);
+        for (auto& x : v_data) x = dist(rng);
+        return std::make_pair(
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, k_data),
+            std::make_shared<Tensor>(std::vector<size_t>{heads, seq_len, head_dim}, v_data)
+        );
+    };
+
+    // prefill 5 (spans 2 blocks), then 2 decode steps
+    auto chunks = std::vector<std::pair<TensorPtr, TensorPtr>>{make_chunk(5), make_chunk(1), make_chunk(1)};
+
+    KVBlockPool cpu_pool(heads, head_dim, /*max_blocks=*/8, block_size, Device::CPU, /*use_quantization=*/true);
+    KVBlockPool cuda_pool(heads, head_dim, /*max_blocks=*/8, block_size, Device::CUDA, /*use_quantization=*/true);
+    size_t seq_id = 0;
+
+    for (auto& chunk : chunks) {
+        cpu_pool.append(seq_id, chunk.first, chunk.second);
+        cuda_pool.append(seq_id, chunk.first->to(Device::CUDA), chunk.second->to(Device::CUDA));
+    }
+
+    TensorPtr k_cpu = cpu_pool.get_k(seq_id), v_cpu = cpu_pool.get_v(seq_id);
+    TensorPtr k_gpu = cuda_pool.get_k(seq_id)->to(Device::CPU), v_gpu = cuda_pool.get_v(seq_id)->to(Device::CPU);
+
+    REQUIRE(k_gpu->shape() == k_cpu->shape());
+
+    for (size_t h = 0; h < heads; h++) {
+        for (size_t i = 0; i < k_cpu->shape()[1]; i++) {
+            for (size_t j = 0; j < head_dim; j++) {
+                // both quantize the same underlying floats independently -- should match near-exactly,
+                // small slack for float rounding differences between CPU and CUDA rounding intrinsics
+                CHECK(std::fabs(k_gpu->at({h, i, j}) - k_cpu->at({h, i, j})) < 0.01f);
+                CHECK(std::fabs(v_gpu->at({h, i, j}) - v_cpu->at({h, i, j})) < 0.01f);
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     init_cuda_mempool();
 
