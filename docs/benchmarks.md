@@ -114,3 +114,23 @@ effect of the allocator work — flagged here rather than silently re-baselined.
 Other benchmark/example files (`examples/*_benchmark.cpp` besides this one) and `tests/test_m9_cuda.cpp`
 still allocate raw `cudaMalloc`/`cudaFree` for their own standalone buffers — untouched, since they
 don't go through `Tensor::from_device_ptr` and weren't part of this pass.
+
+## KV cache int8 quantization (CharModel::generate, 4 blocks, 4 heads, 64-dim, 8-token prompt, 200 new tokens, CPU) — 2026-08-20
+
+`KVBlockPool` gained an opt-in `use_quantization` flag: K/V values are quantized to int8 with a
+per-(head, token) scale on `append()`, dequantized back to float on `get_k()`/`get_v()`. Wired
+through into `CharModel::generate(..., use_quantized_kv_cache)`. Default is off (unquantized,
+existing behavior unchanged); CUDA kernels (`quantize_cuda`/`dequantize_cuda`) exist and are
+tested but not yet exercised by this specific benchmark (CPU-only run).
+
+| | time | KV cache memory (all blocks, one sequence) |
+|---|---|---|
+| Plain (float32) | 267.25 ms | 416 KB |
+| Quantized (int8) | 268.90 ms | 130 KB |
+
+**~3.2x smaller KV cache, ~0.6% slower.** Memory savings land under the naive 4x (float32 vs int8)
+because each slot's scale factor (4 bytes) is stored alongside the compressed data, and slot
+granularity here is per-(head, token) rather than per-block — more scales than a coarser scheme
+would need, traded for correctness under incremental (decode-time) writes into a block. Time cost
+is close to free since the quantize/dequantize work is O(head_dim) per token, dwarfed by the rest
+of the forward pass.
